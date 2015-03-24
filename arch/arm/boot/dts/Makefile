@@ -535,7 +535,8 @@ dtb-$(CONFIG_MACH_SUN6I) += \
 	sun6i-a31-colombus.dtb \
 	sun6i-a31-hummingbird.dtb \
 	sun6i-a31-m9.dtb \
-	sun6i-a31s-cs908.dtb
+	sun6i-a31s-cs908.dtb \
+    sun6i-a31-mixtile-loftq.dtb
 dtb-$(CONFIG_MACH_SUN7I) += \
 	sun7i-a20-bananapi.dtb \
 	sun7i-a20-bananapro.dtb \
