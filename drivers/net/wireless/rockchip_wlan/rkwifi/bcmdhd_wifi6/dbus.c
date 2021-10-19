@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /** @file dbus.c
  *
  * Hides details of USB / SDIO / SPI interfaces and OS details. It is intended to shield details and
@@ -2781,9 +2780,10 @@ dhd_dbus_probe_cb(void *arg, const char *desc, uint32 bustype,
 	}
 
 	if (!g_pub) {
-		/* Ok, finish the attach to the OS network interface */
-		if (dhd_register_if(pub, 0, TRUE) != 0) {
-			DBUSERR(("%s: dhd_register_if failed\n", __FUNCTION__));
+		/* Ok, have the per-port tell the stack we're open for business */
+		if (dhd_attach_net(bus->dhd, TRUE) != 0)
+		{
+			DBUSERR(("%s: Net attach failed!!\n", __FUNCTION__));
 			goto fail;
 		}
 		pub->hang_report  = TRUE;

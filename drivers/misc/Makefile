@@ -62,3 +62,6 @@ obj-$(CONFIG_MISC_RTSX)		+= cardreader/
 obj-$(CONFIG_UID_SYS_STATS)	+= uid_sys_stats.o
 obj-$(CONFIG_PIR_ASCHIP)	+= pir-aschip.o
 obj-$(CONFIG_RK803)		+= rk803.o
+
+obj-$(CONFIG_CUSTOM_DEVICE_POWERON)	+= custom_device_poweron.o
+

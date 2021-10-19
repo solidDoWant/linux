@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Linux DHD Bus Module for PCIE
  *
@@ -1830,8 +1829,11 @@ int dhdpcie_init(struct pci_dev *pdev)
 		if (bus->dev->bus) {
 			/* self member of structure pci_bus is bridge device as seen by parent */
 			bus->rc_dev = bus->dev->bus->self;
-			DHD_ERROR(("%s: rc_dev from dev->bus->self (%x:%x) is %pK\n", __FUNCTION__,
-				bus->rc_dev->vendor, bus->rc_dev->device, bus->rc_dev));
+			if (bus->rc_dev)
+				DHD_ERROR(("%s: rc_dev from dev->bus->self (%x:%x) is %pK\n", __FUNCTION__,
+					bus->rc_dev->vendor, bus->rc_dev->device, bus->rc_dev));
+			else
+				DHD_ERROR(("%s: bus->dev->bus->self is NULL\n", __FUNCTION__));
 		} else {
 			DHD_ERROR(("%s: unable to get rc_dev as dev->bus is NULL\n", __FUNCTION__));
 		}
@@ -2547,7 +2549,7 @@ int dhdpcie_oob_intr_register(dhd_bus_t *bus)
 
 	dhdpcie_osinfo->oob_irq_registered = TRUE;
 
-	return err;
+	return 0;
 }
 
 void dhdpcie_oob_intr_unregister(dhd_bus_t *bus)

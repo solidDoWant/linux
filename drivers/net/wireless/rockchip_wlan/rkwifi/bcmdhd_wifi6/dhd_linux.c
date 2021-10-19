@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Broadcom Dongle Host Driver (DHD), Linux-specific network interface
  * Basically selected code segments from usb-cdc.c and usb-rndis.c
@@ -65,7 +64,7 @@
 #endif /* ENABLE_ADAPTIVE_SCHED */
 #include <linux/rtc.h>
 #include <linux/namei.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #include <dhd_linux_priv.h>
 
@@ -111,6 +110,10 @@
 #ifdef RTT_SUPPORT
 #include <dhd_rtt.h>
 #endif // endif
+
+#ifdef CSI_SUPPORT
+#include <dhd_csi.h>
+#endif /* CSI_SUPPORT */
 
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
@@ -894,8 +897,11 @@ static int dhd_pm_callback(struct notifier_block *nfb, unsigned long action, voi
 			dhd_suspend_resume_helper(dhdinfo, suspend, 0);
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && (LINUX_VERSION_CODE <= \
+        KERNEL_VERSION(2, 6, 39))
 	dhd_mmc_suspend = suspend;
 	smp_mb();
+#endif
 
 	return ret;
 }
@@ -3178,6 +3184,13 @@ dhd_os_wlfc_unblock(dhd_pub_t *pub)
 
 #endif /* PROP_TXSTATUS */
 
+#if defined(WL_MONITOR) && defined(BCMSDIO)
+static void
+dhd_rx_mon_pkt_sdio(dhd_pub_t *dhdp, void *pkt, int ifidx);
+bool
+dhd_monitor_enabled(dhd_pub_t *dhd, int ifidx);
+#endif /* WL_MONITOR && BCMSDIO */
+
 /*  This routine do not support Packet chain feature, Currently tested for
  *  proxy arp feature
  */
@@ -3216,6 +3229,11 @@ int dhd_sendup(dhd_pub_t *dhdp, int ifidx, void *p)
 			 */
 			bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
 				__FUNCTION__, __LINE__);
+#if defined(WL_MONITOR) && defined(BCMSDIO)
+			if (dhd_monitor_enabled(dhdp, ifidx)) 
+				dhd_rx_mon_pkt_sdio(dhdp, skb, ifidx);
+			else
+#endif /* WL_MONITOR && BCMSDIO */
 			netif_rx_ni(skb);
 		}
 	}
@@ -3589,6 +3607,16 @@ dhd_start_xmit(struct sk_buff *skb, struct net_device *net)
 
 	datalen  = PKTLEN(dhd->pub.osh, skb);
 
+#ifdef HOST_TPUT_TEST
+	dhd_os_sdlock_txq(&dhd->pub);
+	dhd->pub.net_len += datalen;
+	dhd_os_sdunlock_txq(&dhd->pub);
+	if ((dhd->pub.conf->data_drop_mode == XMIT_DROP) &&
+			(PKTLEN(dhd->pub.osh, skb) > 500)) {
+		dev_kfree_skb(skb);
+		return NETDEV_TX_OK;
+	}
+#endif
 	/* Make sure there's enough room for any header */
 	if (skb_headroom(skb) < dhd->pub.hdrlen + htsfdlystat_sz) {
 		struct sk_buff *skb2;
@@ -3837,13 +3865,13 @@ __dhd_txflowcontrol(dhd_pub_t *dhdp, struct net_device *net, bool state)
 		netif_stop_queue(net);
 		dhd_prot_update_pktid_txq_stop_cnt(dhdp);
 	} else if (state == ON) {
-		DHD_ERROR(("%s: Netif Queue has already stopped\n", __FUNCTION__));
+		DHD_INFO(("%s: Netif Queue has already stopped\n", __FUNCTION__));
 	}
 	if ((state == OFF) && (dhdp->txoff == TRUE)) {
 		netif_wake_queue(net);
 		dhd_prot_update_pktid_txq_start_cnt(dhdp);
 	} else if (state == OFF) {
-		DHD_ERROR(("%s: Netif Queue has already started\n", __FUNCTION__));
+		DHD_INFO(("%s: Netif Queue has already started\n", __FUNCTION__));
 	}
 }
 
@@ -4679,7 +4707,7 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 			 * logtrace_pkt_sendup is true
 			 */
 			if (event_type == WLC_E_TRACE) {
-				DHD_TRACE(("%s: WLC_E_TRACE\n", __FUNCTION__));
+				DHD_EVENT(("%s: WLC_E_TRACE\n", __FUNCTION__));
 				dhd_event_logtrace_enqueue(dhdp, ifidx, pktbuf);
 				continue;
 			}
@@ -4857,6 +4885,11 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 			bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
 				__FUNCTION__, __LINE__);
 			DHD_PERIM_UNLOCK_ALL((dhd->fwder_unit % FWDER_MAX_UNIT));
+#if defined(WL_MONITOR) && defined(BCMSDIO)
+			if (dhd_monitor_enabled(dhdp, ifidx)) 
+				dhd_rx_mon_pkt_sdio(dhdp, skb, ifidx);
+			else
+#endif /* WL_MONITOR && BCMSDIO */
 #if defined(DHD_LB_RXP)
 			netif_receive_skb(skb);
 #else /* !defined(DHD_LB_RXP) */
@@ -5236,6 +5269,11 @@ dhd_rxf_thread(void *data)
 				PKTSETNEXT(pub->osh, skb, NULL);
 				bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
 					__FUNCTION__, __LINE__);
+#if defined(WL_MONITOR) && defined(BCMSDIO)
+				if (dhd_monitor_enabled(pub, 0)) 
+					dhd_rx_mon_pkt_sdio(pub, skb, 0);
+				else
+#endif /* WL_MONITOR && BCMSDIO */
 				netif_rx_ni(skb);
 				skb = skbnext;
 			}
@@ -5665,6 +5703,34 @@ dhd_monitor_enabled(dhd_pub_t *dhd, int ifidx)
 	return (dhd->info->monitor_type != 0);
 }
 
+#ifdef BCMSDIO
+static void
+dhd_rx_mon_pkt_sdio(dhd_pub_t *dhdp, void *pkt, int ifidx)
+{
+	dhd_info_t *dhd = (dhd_info_t *)dhdp->info;
+
+	if (!dhd->monitor_skb) {
+		if ((dhd->monitor_skb = PKTTONATIVE(dhdp->osh, pkt)) == NULL)
+			return;
+	}
+
+	if (dhd->monitor_type && dhd->monitor_dev)
+		dhd->monitor_skb->dev = dhd->monitor_dev;
+	else {
+		PKTFREE(dhdp->osh, pkt, FALSE);
+		dhd->monitor_skb = NULL;
+		return;
+	}
+
+	dhd->monitor_skb->protocol =
+		eth_type_trans(dhd->monitor_skb, dhd->monitor_skb->dev);
+	dhd->monitor_len = 0;
+
+	netif_rx_ni(dhd->monitor_skb);
+
+	dhd->monitor_skb = NULL;
+}
+#elif defined(BCMPCIE)
 void
 dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t* msg, void *pkt, int ifidx)
 {
@@ -5755,6 +5821,7 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t* msg, void *pkt, int ifidx)
 
 	dhd->monitor_skb = NULL;
 }
+#endif
 
 typedef struct dhd_mon_dev_priv {
 	struct net_device_stats stats;
@@ -6110,7 +6177,7 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 	}
 }
 
-static void
+void
 dhd_set_monitor(dhd_pub_t *pub, int ifidx, int val)
 {
 	dhd_info_t *dhd = pub->info;
@@ -6256,23 +6323,6 @@ int dhd_ioctl_process(dhd_pub_t *pub, int ifidx, dhd_ioctl_t *ioc, void *data_bu
 	}
 
 	bcmerror = dhd_wl_ioctl(pub, ifidx, (wl_ioctl_t *)ioc, data_buf, buflen);
-
-#ifdef WL_MONITOR
-	/* Intercept monitor ioctl here, add/del monitor if */
-	if (bcmerror == BCME_OK && ioc->cmd == WLC_SET_MONITOR) {
-		int val = 0;
-		if (data_buf != NULL && buflen != 0) {
-			if (buflen >= 4) {
-				val = *(int*)data_buf;
-			} else if (buflen >= 2) {
-				val = *(short*)data_buf;
-			} else {
-				val = *(char*)data_buf;
-			}
-		}
-		dhd_set_monitor(pub, ifidx, val);
-	}
-#endif /* WL_MONITOR */
 
 done:
 	dhd_check_hang(net, pub, bcmerror);
@@ -8932,6 +8982,10 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	dhd->dhd_state = dhd_state;
 
 	dhd_found++;
+	
+#ifdef CSI_SUPPORT
+	dhd_csi_init(&dhd->pub);
+#endif /* CSI_SUPPORT */
 
 #ifdef DHD_DUMP_MNGR
 	dhd->pub.dump_file_manage =
@@ -10781,6 +10835,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef WL_ESCAN
 	setbit(eventmask, WLC_E_ESCAN_RESULT);
 #endif /* WL_ESCAN */
+#ifdef CSI_SUPPORT
+	setbit(eventmask, WLC_E_CSI);
+#endif /* CSI_SUPPORT */
 #ifdef RTT_SUPPORT
 	setbit(eventmask, WLC_E_PROXD);
 #endif /* RTT_SUPPORT */
@@ -10803,6 +10860,8 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	setbit(eventmask, WLC_E_TRACE);
 #else
 	clrbit(eventmask, WLC_E_TRACE);
+	if (dhd->conf->chip == BCM43752_CHIP_ID)
+		setbit(eventmask, WLC_E_TRACE);
 #endif /* defined(SHOW_LOGTRACE) && defined(LOGTRACE_FROM_FILE) */
 
 	setbit(eventmask, WLC_E_CSA_COMPLETE_IND);
@@ -10875,6 +10934,9 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef WL_MBO
 		setbit(eventmask_msg->mask, WLC_E_MBO);
 #endif /* WL_MBO */
+#ifdef WL_CLIENT_SAE
+		setbit(eventmask_msg->mask, WLC_E_JOIN_START);
+#endif /* WL_CLIENT_SAE */
 #ifdef WL_BCNRECV
 		setbit(eventmask_msg->mask, WLC_E_BCNRECV_ABORTED);
 #endif /* WL_BCNRECV */
@@ -12243,6 +12305,10 @@ void dhd_detach(dhd_pub_t *dhdp)
 		DHD_LB_STATS_DEINIT(&dhd->pub);
 	}
 #endif /* DHD_LB */
+
+#ifdef CSI_SUPPORT
+	dhd_csi_deinit(dhdp);
+#endif /* CSI_SUPPORT */
 
 #if defined(DNGL_AXI_ERROR_LOGGING) && defined(DHD_USE_WQ_FOR_DNGL_AXI_ERROR)
 	cancel_work_sync(&dhd->axi_error_dispatcher_work);
@@ -15526,7 +15592,7 @@ dhd_wait_pend8021x(struct net_device *dev)
 	if (ntimes == 0)
 	{
 		atomic_set(&dhd->pend_8021x_cnt, 0);
-		DHD_ERROR(("%s: TIMEOUT\n", __FUNCTION__));
+		WL_MSG(dev->name, "TIMEOUT\n");
 	}
 	return pend;
 }
@@ -18600,10 +18666,11 @@ dhd_export_debug_data(void *mem_buf, void *fp, const void *user_buf, int buf_len
 	} else {
 #ifdef CONFIG_COMPAT
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0))
-		if (in_compat_syscall()) {
+		if (in_compat_syscall())
 #else
-		if (is_compat_task()) {
+		if (is_compat_task())
 #endif /* LINUX_VER >= 4.6 */
+		{
 			void * usr_ptr =  compat_ptr((uintptr_t) user_buf);
 			ret = copy_to_user((void *)((uintptr_t)usr_ptr + (*(int *)pos)),
 				mem_buf, buf_len);

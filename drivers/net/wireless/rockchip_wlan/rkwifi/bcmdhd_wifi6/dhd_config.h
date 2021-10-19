@@ -15,6 +15,7 @@
 #define FW_TYPE_MESH    3
 #define FW_TYPE_ES      4
 #define FW_TYPE_MFG     5
+#define FW_TYPE_MINIME  6
 #define FW_TYPE_G       0
 #define FW_TYPE_AG      1
 
@@ -126,6 +127,14 @@ enum in_suspend_mode {
 	PM_NOTIFIER = 1
 };
 
+#ifdef HOST_TPUT_TEST
+enum data_drop_mode {
+	NO_DATA_DROP = 0,
+	TXPKT_DROP = 1,
+	XMIT_DROP = 2
+};
+#endif
+
 enum eapol_status {
 	EAPOL_STATUS_NONE = 0,
 	EAPOL_STATUS_REQID = 1,
@@ -213,6 +222,9 @@ typedef struct dhd_conf {
 	int txinrx_thres;
 	int dhd_txminmax; // -1=DATABUFCNT(bus)
 	bool oob_enabled_later;
+#ifdef MINIME
+	uint32 ramsize;
+#endif
 #if defined(SDIO_ISR_THREAD)
 	bool intr_extn;
 #endif
@@ -271,6 +283,13 @@ typedef struct dhd_conf {
 	char hw_ether[62];
 #endif
 	wait_queue_head_t event_complete;
+#ifdef PROPTX_MAXCOUNT
+	int proptx_maxcnt_2g;
+	int proptx_maxcnt_5g;
+#endif /* DYNAMIC_PROPTX_MAXCOUNT */
+#ifdef HOST_TPUT_TEST
+	int data_drop_mode;
+#endif
 } dhd_conf_t;
 
 #ifdef BCMSDIO
@@ -279,7 +298,6 @@ void dhd_conf_get_otp(dhd_pub_t *dhd, bcmsdh_info_t *sdh, si_t *sih);
 void dhd_conf_set_hw_oob_intr(bcmsdh_info_t *sdh, struct si_pub *sih);
 #endif
 void dhd_conf_set_txglom_params(dhd_pub_t *dhd, bool enable);
-int dhd_conf_set_blksize(bcmsdh_info_t *sdh);
 #endif
 void dhd_conf_set_path_params(dhd_pub_t *dhd, char *fw_path, char *nv_path);
 int dhd_conf_set_intiovar(dhd_pub_t *dhd, uint cmd, char *name, int val,
@@ -288,6 +306,9 @@ int dhd_conf_get_band(dhd_pub_t *dhd);
 int dhd_conf_set_country(dhd_pub_t *dhd, wl_country_t *cspec);
 int dhd_conf_get_country(dhd_pub_t *dhd, wl_country_t *cspec);
 int dhd_conf_map_country_list(dhd_pub_t *dhd, wl_country_t *cspec);
+#ifdef CCODE_LIST
+int dhd_ccode_map_country_list(dhd_pub_t *dhd, wl_country_t *cspec);
+#endif
 int dhd_conf_fix_country(dhd_pub_t *dhd);
 bool dhd_conf_match_channel(dhd_pub_t *dhd, uint32 channel);
 void dhd_conf_set_wme(dhd_pub_t *dhd, int ifidx, int mode);

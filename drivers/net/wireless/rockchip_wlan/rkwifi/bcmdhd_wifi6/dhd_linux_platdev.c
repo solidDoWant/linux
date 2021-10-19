@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Linux platform device for DHD WLAN adapter
  *
@@ -591,7 +590,7 @@ static int wifi_ctrlfunc_register_drv(void)
 void wifi_ctrlfunc_unregister_drv(void)
 {
 #ifndef CONFIG_DTS
-	wifi_adapter_info_t *adapter = NULL;
+	wifi_adapter_info_t *adapter;
 #endif
 
 #if defined(CONFIG_DTS) && !defined(CUSTOMER_HW)

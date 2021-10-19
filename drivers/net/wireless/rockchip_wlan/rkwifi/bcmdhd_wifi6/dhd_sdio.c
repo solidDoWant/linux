@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * DHD Bus Module for SDIO
  *
@@ -185,10 +184,6 @@ static int dhdsdio_resume(void *context);
 #define PKTFREE2()		if ((bus->bus != SPI_BUS) || bus->usebufpool) \
 					PKTFREE(bus->dhd->osh, pkt, FALSE);
 DHD_SPINWAIT_SLEEP_INIT(sdioh_spinwait_sleep);
-
-#ifdef PKT_STATICS
-pkt_statics_t tx_statics = {0};
-#endif
 
 #ifdef SUPPORT_MULTIPLE_BOARD_REV_FROM_HW
 extern unsigned int system_hw_rev;
@@ -453,6 +448,9 @@ typedef struct dhd_bus {
 #endif /* defined (BT_OVER_SDIO) */
 	uint		txglomframes;	/* Number of tx glom frames (superframes) */
 	uint		txglompkts;		/* Number of packets from tx glom frames */
+#ifdef PKT_STATICS
+	struct pkt_statics tx_statics;
+#endif
 	uint8		*membuf;		/* Buffer for dhdsdio_membytes */
 #ifdef CONSOLE_DPC
 	char		cons_cmd[16];
@@ -2231,24 +2229,24 @@ static int dhdsdio_txpkt_preprocess(dhd_bus_t *bus, void *pkt, int chan, int txs
 	len = (uint16)PKTLEN(osh, pkt);
 	switch(chan) {
 		case SDPCM_CONTROL_CHANNEL:
-			tx_statics.ctrl_count++;
-			tx_statics.ctrl_size += len;
+			bus->tx_statics.ctrl_count++;
+			bus->tx_statics.ctrl_size += len;
 			break;
 		case SDPCM_DATA_CHANNEL:
-			tx_statics.data_count++;
-			tx_statics.data_size += len;
+			bus->tx_statics.data_count++;
+			bus->tx_statics.data_size += len;
 			break;
 		case SDPCM_GLOM_CHANNEL:
-			tx_statics.glom_count++;
-			tx_statics.glom_size += len;
+			bus->tx_statics.glom_count++;
+			bus->tx_statics.glom_size += len;
 			break;
 		case SDPCM_EVENT_CHANNEL:
-			tx_statics.event_count++;
-			tx_statics.event_size += len;
+			bus->tx_statics.event_count++;
+			bus->tx_statics.event_size += len;
 			break;
 		case SDPCM_TEST_CHANNEL:
-			tx_statics.test_count++;
-			tx_statics.test_size += len;
+			bus->tx_statics.test_count++;
+			bus->tx_statics.test_size += len;
 			break;
 
 		default:
@@ -2583,10 +2581,21 @@ static int dhdsdio_txpkt(dhd_bus_t *bus, uint chan, void** pkts, int num_pkt, bo
 	 * so it will take the aligned length and buffer pointer.
 	 */
 	pkt_chain = PKTNEXT(osh, head_pkt) ? head_pkt : NULL;
+#ifdef HOST_TPUT_TEST
+	if ((bus->dhd->conf->data_drop_mode == TXPKT_DROP) && (total_len > 500)) {
+		ret = BCME_OK;
+	} else {
+		ret = dhd_bcmsdh_send_buf(bus, bcmsdh_cur_sbwad(sdh), SDIO_FUNC_2, F2SYNC,
+			PKTDATA(osh, head_pkt), total_len, pkt_chain, NULL, NULL, TXRETRIES);
+		if (ret == BCME_OK)
+			bus->tx_seq = (bus->tx_seq + num_pkt) % SDPCM_SEQUENCE_WRAP;
+	}
+#else
 	ret = dhd_bcmsdh_send_buf(bus, bcmsdh_cur_sbwad(sdh), SDIO_FUNC_2, F2SYNC,
 		PKTDATA(osh, head_pkt), total_len, pkt_chain, NULL, NULL, TXRETRIES);
 	if (ret == BCME_OK)
 		bus->tx_seq = (bus->tx_seq + num_pkt) % SDPCM_SEQUENCE_WRAP;
+#endif
 
 	/* if a padding packet was needed, remove it from the link list as it not a data pkt */
 	if (pad_pkt_len && pkt)
@@ -2636,7 +2645,6 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 	uint32 intstatus = 0;
 	uint retries = 0;
 	osl_t *osh;
-	uint datalen = 0;
 	dhd_pub_t *dhd = bus->dhd;
 	sdpcmd_regs_t *regs = bus->regs;
 #ifdef DHD_LOSSLESS_ROAMING
@@ -2665,6 +2673,7 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 		int num_pkt = 1;
 		void *pkts[MAX_TX_PKTCHAIN_CNT];
 		int prec_out;
+		uint datalen = 0;
 
 		dhd_os_sdlock_txq(bus->dhd);
 		if (bus->txglom_enable) {
@@ -2723,13 +2732,18 @@ dhdsdio_sendfromq(dhd_bus_t *bus, uint maxframes)
 			dhd->dstats.tx_bytes += datalen;
 			bus->txglomframes++;
 			bus->txglompkts += num_pkt;
+#ifdef PKT_STATICS
+			bus->tx_statics.glom_cnt_us[num_pkt-1] =
+				(bus->tx_statics.glom_cnt[num_pkt-1]*bus->tx_statics.glom_cnt_us[num_pkt-1]
+				+ bcmsdh_get_spend_time(bus->sdh))/(bus->tx_statics.glom_cnt[num_pkt-1] + 1);
+#endif
 		}
 		cnt += i;
 #ifdef PKT_STATICS
 		if (num_pkt) {
-			tx_statics.glom_cnt[num_pkt-1]++;
-			if (num_pkt > tx_statics.glom_max)
-				tx_statics.glom_max = num_pkt;
+			bus->tx_statics.glom_cnt[num_pkt-1]++;
+			if (num_pkt > bus->tx_statics.glom_max)
+				bus->tx_statics.glom_max = num_pkt;
 		}
 #endif
 
@@ -2954,8 +2968,8 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		}
 #endif // endif
 #ifdef PKT_STATICS
-		tx_statics.ctrl_count++;
-		tx_statics.ctrl_size += len;
+		bus->tx_statics.ctrl_count++;
+		bus->tx_statics.ctrl_size += len;
 #endif
 		ret = dhd_bcmsdh_send_buffer(bus, frame, len);
 	}
@@ -4663,7 +4677,11 @@ dhdsdio_write_vars(dhd_bus_t *bus)
 		MFREE(bus->dhd->osh, vbuffer, varsize);
 	}
 
+#ifdef MINIME
+	phys_size = bus->ramsize;
+#else
 	phys_size = REMAP_ENAB(bus) ? bus->ramsize : bus->orig_ramsize;
+#endif
 
 	phys_size += bus->dongle_ram_base;
 
@@ -7259,7 +7277,7 @@ dhdsdio_isr(void *arg)
 		return;
 	}
 
-	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
+	DHD_INTR(("%s: Enter\n", __FUNCTION__));
 
 	/* Count the interrupt call */
 	bus->intrcount++;
@@ -7307,42 +7325,69 @@ dhdsdio_isr(void *arg)
 }
 
 #ifdef PKT_STATICS
-void dhdsdio_txpktstatics(void)
+void dhd_bus_dump_txpktstatics(struct dhd_bus *bus)
 {
-	uint i, total = 0;
+	uint i;
+	uint32 total = 0;
 
 	printf("%s: TYPE EVENT: %d pkts (size=%d) transfered\n",
-		__FUNCTION__, tx_statics.event_count, tx_statics.event_size);
+		__FUNCTION__, bus->tx_statics.event_count, bus->tx_statics.event_size);
 	printf("%s: TYPE CTRL:  %d pkts (size=%d) transfered\n",
-		__FUNCTION__, tx_statics.ctrl_count, tx_statics.ctrl_size);
+		__FUNCTION__, bus->tx_statics.ctrl_count, bus->tx_statics.ctrl_size);
 	printf("%s: TYPE DATA:  %d pkts (size=%d) transfered\n",
-		__FUNCTION__, tx_statics.data_count, tx_statics.data_size);
+		__FUNCTION__, bus->tx_statics.data_count, bus->tx_statics.data_size);
 	printf("%s: Glom size distribution:\n", __FUNCTION__);
-	for (i=0;i<tx_statics.glom_max;i++) {
-		total += tx_statics.glom_cnt[i];
+	for (i=0;i<bus->tx_statics.glom_max;i++) {
+		total += bus->tx_statics.glom_cnt[i];
 	}
-	for (i=0;i<tx_statics.glom_max;i++) {
-		printf("%02d: %d", i+1, tx_statics.glom_cnt[i]);
+	printk(KERN_CONT "[dhd] ");
+	for (i=0;i<bus->tx_statics.glom_max;i++) {
+		printk(KERN_CONT "%02d: %5d", i+1, bus->tx_statics.glom_cnt[i]);
 		if ((i+1)%8)
-			printf(", ");
-		else
-			printf("\n");
-	}
-	printf("\n");
-	for (i=0;i<tx_statics.glom_max;i++) {
-		printf("%02d:%3d%%", i+1, (tx_statics.glom_cnt[i]*100)/total);
+			printk(KERN_CONT ", ");
+		else {
+			printk("\n");
+			printk(KERN_CONT "[dhd] ");
+		}
+ 	}
+	printk("\n");
+	printk(KERN_CONT "[dhd] ");
+	for (i=0;i<bus->tx_statics.glom_max;i++) {
+		printk(KERN_CONT "%02d:%5d%%", i+1, (bus->tx_statics.glom_cnt[i]*100)/total);
 		if ((i+1)%8)
-			printf(", ");
-		else
-			printf("\n");
+			printk(KERN_CONT ", ");
+		else {
+			printk("\n");
+			printk(KERN_CONT "[dhd] ");
+		}
 	}
-	printf("\n");
-	printf("%s: data/glom=%d, glom_max=%d\n",
-		__FUNCTION__, tx_statics.data_count/total, tx_statics.glom_max);
+	printk("\n");
+	printf("%s: Glom spend time distribution(us):\n", __FUNCTION__);
+	printk(KERN_CONT "[dhd] ");
+	for (i=0;i<bus->tx_statics.glom_max;i++) {
+		printk(KERN_CONT "%02d: %5u", i+1, bus->tx_statics.glom_cnt_us[i]);
+		if ((i+1)%8)
+			printk(KERN_CONT ", ");
+		else {
+			printk("\n");
+			printk(KERN_CONT "[dhd] ");
+		}
+ 	}
+	printk("\n");
+	if (total) {
+		printf("%s: data(%d)/glom(%d)=%d, glom_max=%d\n",
+			__FUNCTION__, bus->tx_statics.data_count, total,
+			bus->tx_statics.data_count/total, bus->tx_statics.glom_max);
+	}
 	printf("%s: TYPE RX GLOM: %d pkts (size=%d) transfered\n",
-		__FUNCTION__, tx_statics.glom_count, tx_statics.glom_size);
-	printf("%s: TYPE TEST: %d pkts (size=%d) transfered\n\n\n",
-		__FUNCTION__, tx_statics.test_count, tx_statics.test_size);
+		__FUNCTION__, bus->tx_statics.glom_count, bus->tx_statics.glom_size);
+	printf("%s: TYPE TEST: %d pkts (size=%d) transfered\n",
+		__FUNCTION__, bus->tx_statics.test_count, bus->tx_statics.test_size);
+}
+
+void dhd_bus_clear_txpktstatics(struct dhd_bus *bus)
+{
+	memset((uint8*) &bus->tx_statics, 0, sizeof(pkt_statics_t));
 }
 #endif
 
@@ -8721,7 +8766,7 @@ dhdsdio_probe_init(dhd_bus_t *bus, osl_t *osh, void *sdh)
 	bus->dotxinrx = TRUE;
 
 #ifdef PKT_STATICS
-	memset((uint8*) &tx_statics, 0, sizeof(pkt_statics_t));
+	dhd_bus_clear_txpktstatics(bus);
 #endif
 
 	return TRUE;
@@ -8762,6 +8807,12 @@ dhd_set_bus_params(struct dhd_bus *bus)
 	if (bus->dhd->conf->txglomsize >= 0) {
 		bus->txglomsize = bus->dhd->conf->txglomsize;
 	}
+#ifdef MINIME
+	if (bus->dhd->conf->fw_type == FW_TYPE_MINIME) {
+		bus->ramsize = bus->dhd->conf->ramsize;
+		printf("%s: set ramsize 0x%x\n", __FUNCTION__, bus->ramsize);
+	}
+#endif
 }
 
 static int
@@ -8785,11 +8836,11 @@ dhdsdio_download_firmware(struct dhd_bus *bus, osl_t *osh, void *sdh)
 		__FUNCTION__, bus->fw_path, bus->nv_path));
 	DHD_OS_WAKE_LOCK(bus->dhd);
 
-	/* Download the firmware */
-	dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
-
 	dhd_conf_set_path_params(bus->dhd, bus->fw_path, bus->nv_path);
 	dhd_set_bus_params(bus);
+
+	/* Download the firmware */
+	dhdsdio_clkctl(bus, CLK_AVAIL, FALSE);
 
 	ret = _dhdsdio_download_firmware(bus);
 
@@ -9745,7 +9796,7 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 	}
 
 #ifdef PKT_STATICS
-	memset((uint8*) &tx_statics, 0, sizeof(pkt_statics_t));
+	dhd_bus_clear_txpktstatics(bus);
 #endif
 	return bcmerror;
 }

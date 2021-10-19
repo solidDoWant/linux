@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Header file describing the internal (inter-module) DHD interfaces.
  *
@@ -49,7 +48,7 @@
 #include <linux/ethtool.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #if defined(CONFIG_HAS_WAKELOCK)
 #include <linux/wakelock.h>
@@ -1390,6 +1389,10 @@ typedef struct dhd_pub {
 	void *pktcnts;
 #endif /* DHD_PKTDUMP_ROAM */
 	bool disable_dtim_in_suspend;	/* Disable set bcn_li_dtim in suspend */
+#ifdef CSI_SUPPORT
+	struct list_head csi_list;
+	int csi_count;
+#endif /* CSI_SUPPORT */
 	char *clm_path;		/* module_param: path to clm vars file */
 	char *conf_path;		/* module_param: path to config vars file */
 	struct dhd_conf *conf;	/* Bus module handle */
@@ -1410,6 +1413,11 @@ typedef struct dhd_pub {
 	int hostsleep;
 #ifdef SENDPROB
 	bool recv_probereq;
+#endif
+#ifdef HOST_TPUT_TEST
+	struct osl_timespec bus_ts;
+	struct osl_timespec net_ts;
+	uint32 net_len;
 #endif
 } dhd_pub_t;
 
@@ -3411,4 +3419,7 @@ extern void dhd_set_tid_based_on_uid(dhd_pub_t *dhdp, void *pkt);
 extern int dhd_control_he_enab(dhd_pub_t * dhd, uint8 he_enab);
 extern uint8 control_he_enab;
 #endif /* DISABLE_HE_ENAB  || CUSTOM_CONTROL_HE_ENAB */
+#ifdef WL_MONITOR
+void dhd_set_monitor(dhd_pub_t *pub, int ifidx, int val);
+#endif /* WL_MONITOR */
 #endif /* _dhd_h_ */

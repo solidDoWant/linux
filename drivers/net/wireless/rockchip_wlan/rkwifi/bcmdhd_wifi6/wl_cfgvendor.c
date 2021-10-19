@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Linux cfg80211 Vendor Extension Code
  *
@@ -45,7 +44,7 @@
 #include <ethernet.h>
 #include <802.11.h>
 #include <linux/if_arp.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 
 #include <dngl_stats.h>
 #include <dhd.h>
@@ -1280,6 +1279,11 @@ static int wl_cfgvendor_set_rssi_monitor(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	int8 max_rssi = 0, min_rssi = 0;
 	const struct nlattr *iter;
+
+	if (!wl_get_drv_status(cfg, CONNECTED, wdev_to_ndev(wdev))) {
+		WL_ERR(("STA is not connected to an AP, rssi monitoring is not allowed\n"));
+		return -EINVAL;
+	}
 
 	nla_for_each_attr(iter, data, len, tmp) {
 		type = nla_type(iter);

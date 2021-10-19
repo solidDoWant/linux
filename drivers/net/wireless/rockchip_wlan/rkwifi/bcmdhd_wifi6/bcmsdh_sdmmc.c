@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
@@ -1025,6 +1024,14 @@ sdioh_set_mode(sdioh_info_t *sd, uint mode)
 	return (sd->txglom_mode);
 }
 
+#ifdef PKT_STATICS
+uint32
+sdioh_get_spend_time(sdioh_info_t *sd)
+{
+	return (sd->sdio_spent_time_us);
+}
+#endif
+
 extern SDIOH_API_RC
 sdioh_request_word(sdioh_info_t *sd, uint cmd_type, uint rw, uint func, uint addr,
                                    uint32 *word, uint nbytes)
@@ -1137,7 +1144,9 @@ sdioh_request_packet_chain(sdioh_info_t *sd, uint fix_inc, uint write, uint func
 	DHD_PM_RESUME_WAIT(sdioh_request_packet_wait);
 	DHD_PM_RESUME_RETURN_ERROR(SDIOH_API_RC_FAIL);
 
+#ifndef PKT_STATICS
 	if (sd_msglevel & SDH_COST_VAL)
+#endif
 		osl_do_gettimeofday(&before);
 
 	blk_size = sd->client_block_size[func];
@@ -1306,11 +1315,19 @@ txglomfail:
 	if (localbuf)
 		MFREE(sd->osh, localbuf, ttl_len);
 
-	if (sd_msglevel & SDH_COST_VAL) {
+#ifndef PKT_STATICS
+	if (sd_msglevel & SDH_COST_VAL)
+#endif
+	{
 		osl_do_gettimeofday(&now);
 		sd_cost(("%s: rw=%d, ttl_len=%d, cost=%lds %luus\n", __FUNCTION__,
 			write, ttl_len, now.tv_sec-before.tv_sec, now.tv_nsec/1000-before.tv_nsec/1000));
 	}
+
+#ifdef PKT_STATICS
+	if (write && (func == 2))
+		sd->sdio_spent_time_us = osl_do_gettimediff(&now, &before);
+#endif
 
 	sd_trace(("%s: Exit\n", __FUNCTION__));
 	return SDIOH_API_RC_SUCCESS;

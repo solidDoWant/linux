@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * @file Broadcom Dongle Host Driver (DHD), Flow ring specific code at top level
  *

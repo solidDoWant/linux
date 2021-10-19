@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /**
  * @file definition of host message ring functionality
  * Provides type definitions and function prototypes used to link the

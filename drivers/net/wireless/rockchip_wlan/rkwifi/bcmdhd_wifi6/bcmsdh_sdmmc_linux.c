@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *

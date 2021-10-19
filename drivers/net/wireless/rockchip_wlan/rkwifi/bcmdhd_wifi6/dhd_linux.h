@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * DHD Linux header file (dhd_linux exports for cfg80211 and other components)
  *

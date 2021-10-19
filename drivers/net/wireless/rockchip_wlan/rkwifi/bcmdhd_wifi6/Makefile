@@ -25,7 +25,7 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Dlinux -DBCMDRIVER                 \
 	-DDHD_DONOT_FORWARD_BCMEVENT_AS_NETWORK_PKT                           \
 	-DMULTIPLE_SUPPLICANT -DTSQ_MULTIPLIER -DMFP -DDHD_8021X_DUMP         \
 	-DPOWERUP_MAX_RETRY=0 -DIFACE_HANG_FORCE_DEV_CLOSE -DWAIT_DEQUEUE     \
-	-DWL_EXT_IAPSTA -DWL_ESCAN                                            \
+	-DWL_EXT_IAPSTA -DWL_ESCAN -DCCODE_LIST                               \
 	-DENABLE_INSMOD_NO_FW_LOAD                                            \
 	-Idrivers/net/wireless/rockchip_wlan/rkwifi/bcmdhd_wifi6 \
 	-Idrivers/net/wireless/rockchip_wlan/rkwifi/bcmdhd_wifi6/include
@@ -37,8 +37,7 @@ DHDOFILES = aiutils.o siutils.o sbutils.o bcmutils.o bcmwifi_channels.o   \
 	dhd_debug_linux.o dhd_debug.o dhd_mschdbg.o dhd_dbg_ring.o            \
 	hnd_pktq.o hnd_pktpool.o bcmxtlv.o linux_pkt.o bcmstdlib_s.o frag.o   \
 	dhd_linux_exportfs.o dhd_linux_pktdump.o                              \
-	dhd_config.o wl_event.o wl_android_ext.o wl_escan.o
-
+	dhd_config.o dhd_ccode.o wl_event.o wl_android_ext.o wl_escan.o
 ifeq ($(BCMDHD_STATIC_IF),y)
 	DHDCFLAGS += -DWL_STATIC_IF
 endif
@@ -63,6 +62,7 @@ ifneq ($(CONFIG_CFG80211),)
 	DHDCFLAGS += -DPNO_SUPPORT -DEXPLICIT_DISCIF_CLEANUP
 	DHDCFLAGS += -DDHD_USE_SCAN_WAKELOCK
 #	DHDCFLAGS += -DWL_STATIC_IF
+#	DHDCFLAGS += -DWL_CLIENT_SAE
 #	DHDCFLAGS += -DWL_SAE
 endif
 
@@ -120,7 +120,7 @@ ifneq ($(CONFIG_BCMDHD_USB),)
 	DHDCFLAGS += -DPROP_TXSTATUS
 endif
 ifneq ($(CONFIG_BCMDHD_SDIO),)
-	DHDCFLAGS += -DPROP_TXSTATUS
+	DHDCFLAGS += -DPROP_TXSTATUS -DPROPTX_MAXCOUNT
 endif
 ifneq ($(CONFIG_CFG80211),)
 	DHDCFLAGS += -DPROP_TXSTATUS_VSDB
@@ -173,6 +173,12 @@ ifeq ($(CONFIG_WL_EASYMESH),y)
 	DHDCFLAGS :=$(filter-out -DDHD_FW_COREDUMP,$(DHDCFLAGS))
 	DHDCFLAGS :=$(filter-out -DDHD_LOG_DUMP,$(DHDCFLAGS))
 	DHDCFLAGS += -DWLEASYMESH -DWL_STATIC_IF -DWLDWDS -DFOURADDR_AUTO_BRG
+endif
+
+#CSI_SUPPORT
+ifneq ($(CONFIG_CSI_SUPPORT),)
+	DHDCFLAGS += -DCSI_SUPPORT
+	DHDOFILES += dhd_csi.o
 endif
 
 #obj-$(CONFIG_RKWIFI) += $(MODULE_NAME).o

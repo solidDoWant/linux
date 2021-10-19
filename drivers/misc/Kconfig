@@ -548,6 +548,13 @@ config RK803
 	help
 	  Driver for RK803 which is used for driving porjector and IR flood LED.
 
+config CUSTOM_DEVICE_POWERON
+	bool "custom device poweron sequence"
+	default n
+	help
+	  custom device poweron sequence compitable.
+
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
