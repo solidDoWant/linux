@@ -88,6 +88,7 @@ struct rk_keys_drvdata {
 
 static struct input_dev *sinput_dev;
 
+#if 0
 void rk_send_power_key(int state)
 {
 	if (!sinput_dev)
@@ -113,10 +114,12 @@ void rk_send_wakeup_key(void)
 	input_sync(sinput_dev);
 }
 EXPORT_SYMBOL(rk_send_wakeup_key);
+#endif
 
-static void keys_timer(unsigned long _data)
+static void keys_timer(struct timer_list *t)
 {
-	struct rk_keys_button *button = (struct rk_keys_button *)_data;
+	//struct rk_keys_button *button = (struct rk_keys_button *)_data;
+	struct rk_keys_button *button = from_timer(button, t, timer);
 	struct rk_keys_drvdata *pdata = dev_get_drvdata(button->dev);
 	struct input_dev *input = pdata->input;
 	int state;
@@ -344,14 +347,14 @@ static int keys_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ddata);
 	dev_set_drvdata(&pdev->dev, ddata);
 
-	input->name = "rk29-keypad";	/* pdev->name; */
+	input->name = "rk-gpio-keypad";	/* pdev->name; */
 	input->phys = "gpio-keys/input0";
 	input->dev.parent = dev;
 
 	input->id.bustype = BUS_HOST;
 	input->id.vendor = 0x0001;
 	input->id.product = 0x0001;
-	input->id.version = 0x0100;
+	input->id.version = 0x0200;
 	ddata->input = input;
 
 	/* parse info from dt */
@@ -376,8 +379,7 @@ static int keys_probe(struct platform_device *pdev)
 		struct rk_keys_button *button = &ddata->button[i];
 
 		if (button->code) {
-			setup_timer(&button->timer,
-				    keys_timer, (unsigned long)button);
+			timer_setup(&button->timer, keys_timer, 0);
 		}
 
 		if (button->wakeup)
