@@ -23,13 +23,10 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 
-#define M2DEV_SSD			"ssd"
-#define M2DEV_MODEM_EM06    "em06"
-#define M2DEV_MODEM_RM500Q  "rm500q"
-#define M2DEV_MODEM_FM150   "fm150"
+#define M2DEV_MODEM_EM06    "4g-em06"
+#define M2DEV_MODEM_RM500Q  "5g-rm500q"
 
-#define MINIPCIEDEV_MODEM_NL668  "nl668"
-#define MINIPCIEDEV_MODEM_EC25  "ec25"
+#define MINIPCIEDEV_MODEM_EC25  "4g-ec25"
 
 #define LOG(x...)   pr_info("[customdev]: " x)
 
@@ -37,19 +34,17 @@ struct customdev_poweron_data {
 	struct device *dev;
 	char m2dev_name[32];
 	char minipciedev_name[32];
-	bool is_m2usbdev_support;
-	bool is_m2pciedev_support;
+	bool is_m2dev_support;
+	bool is_ssd_support;
 	bool is_minipciedev_support;
 	struct gpio_desc *m2_reset_gpio;
 	struct gpio_desc *m2_power_gpio;
 	struct gpio_desc *m2_vbat_gpio;
-	struct gpio_desc *m2_flymode_io;
 	struct gpio_desc *m2_wakein_gpio;
+	struct gpio_desc *m2_ssd_sel_gpio;
 	struct gpio_desc *minipcie_reset_gpio;
 	struct gpio_desc *minipcie_vbat_gpio;
 	struct gpio_desc *minipcie_wakein_gpio;
-	struct gpio_desc *minipcie_wakeout_gpio;
-	struct gpio_desc *minipcie_flymode_io;
 };
 
 static struct customdev_poweron_data *gpdata;
@@ -57,48 +52,13 @@ static struct class *customdev_class;
 static int m2dev_status = 1;
 static int minipciedev_status = 1;
 
-static char *m2usbdev_support_list[] = {"rm500q",
-				 "em06"
+static char *m2dev_support_list[] = {"SSD",
+				 "5G-RM500Q",
+				 "4G-EM06"
 				 };
 
-static char *m2pciedev_support_list[] = {"ssd",
-				"fm150"
+static char *minipciedev_support_list[] = {"4G-EC25"
 				 };
-
-static char *minipciedev_support_list[] = {"nl668",
-				"ec25"
-				 };
-
-
-static int nl668_power(struct customdev_poweron_data *pdata, int on_off)
-{
-	if(on_off) {
-		if (pdata->minipcie_vbat_gpio) {
-			gpiod_direction_output(pdata->minipcie_vbat_gpio, 1);
-			msleep(10);
-		}
-
-		if (pdata->minipcie_reset_gpio) {
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
-			msleep(10);
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
-			msleep(900);
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
-		}
-
-	} else {
-		if (pdata->minipcie_reset_gpio) {
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
-			msleep(10);
-		}
-
-		if (pdata->minipcie_vbat_gpio) {
-			gpiod_direction_output(pdata->minipcie_vbat_gpio, 0);
-		}
-	}
-
-	return 0;
-}
 
 static int ec25_power(struct customdev_poweron_data *pdata, int on_off)
 {
@@ -109,16 +69,16 @@ static int ec25_power(struct customdev_poweron_data *pdata, int on_off)
 		}
 
 		if (pdata->minipcie_reset_gpio) {
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
-			msleep(10);
 			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
-			msleep(250);
+			msleep(10);
 			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
+			msleep(250);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
 		}
 
 	} else {
 		if (pdata->minipcie_reset_gpio) {
-			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
 			msleep(10);
 		}
 
@@ -130,71 +90,40 @@ static int ec25_power(struct customdev_poweron_data *pdata, int on_off)
 	return 0;
 }
 
-static int fm150_power(struct customdev_poweron_data *pdata, int on_off)
-{
-	if(on_off) {
-		if (pdata->m2_vbat_gpio) {
-			gpiod_direction_output(pdata->m2_vbat_gpio, 1);
-			msleep(30);
-		}
-
-		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 1);
-			msleep(30);
-		}
-
-		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(10);
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
-			msleep(30);
-			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(100);
-		}
-
-	} else {
-		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 0);
-			msleep(8000);
-		}
-
-		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
-			msleep(30);
-		}
-
-		if (pdata->m2_vbat_gpio) {
-			gpiod_direction_output(pdata->m2_vbat_gpio, 0);
-		}
-	}
-
-	return 0;
-}
-
 static int ssd_power(struct customdev_poweron_data *pdata, int on_off)
 {
 	if(on_off) {
+		if(pdata->m2_ssd_sel_gpio){
+			gpiod_direction_output(pdata->m2_ssd_sel_gpio, 0);
+			msleep(20);
+		}
+
 		if (pdata->m2_vbat_gpio) {
 			gpiod_direction_output(pdata->m2_vbat_gpio, 1);
 			msleep(10);
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(10);
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
-			msleep(500);
+			msleep(10);
 			gpiod_direction_output(pdata->m2_reset_gpio, 1);
+			msleep(50);
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 		}
 
 	} else {
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
 			msleep(10);
 		}
 
 		if (pdata->m2_vbat_gpio) {
 			gpiod_direction_output(pdata->m2_vbat_gpio, 0);
+		}
+
+		if(pdata->m2_ssd_sel_gpio){
+			gpiod_direction_output(pdata->m2_ssd_sel_gpio, 1);
+			msleep(20);
 		}
 	}
 
@@ -210,26 +139,26 @@ static int em06_power(struct customdev_poweron_data *pdata, int on_off)
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(10);
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
-			msleep(500);
+			msleep(10);
 			gpiod_direction_output(pdata->m2_reset_gpio, 1);
+			msleep(500);
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 		}
 
 		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 1);
+			gpiod_direction_output(pdata->m2_power_gpio, 0);
 			msleep(30);
 		}
 
 	} else {
 		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 0);
+			gpiod_direction_output(pdata->m2_power_gpio, 1);
 			msleep(10);
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
 			msleep(30);
 		}
 
@@ -250,26 +179,26 @@ static int rm500q_power(struct customdev_poweron_data *pdata, int on_off)
 		}
 
 		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 1);
+			gpiod_direction_output(pdata->m2_power_gpio, 0);
 			msleep(30);
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(30);
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
-			msleep(800);
+			msleep(30);
 			gpiod_direction_output(pdata->m2_reset_gpio, 1);
+			msleep(800);
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 		}
 
 	} else {
 		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 0);
+			gpiod_direction_output(pdata->m2_power_gpio, 1);
 			msleep(8000);
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
 			msleep(30);
 		}
 
@@ -281,7 +210,7 @@ static int rm500q_power(struct customdev_poweron_data *pdata, int on_off)
 	return 0;
 }
 
-static int m2usb_device_poweron(int on_off)
+static int m2_device_poweron(int on_off)
 {
 	struct customdev_poweron_data *pdata = gpdata;
 	int bret;
@@ -294,28 +223,21 @@ static int m2usb_device_poweron(int on_off)
 			bret = rm500q_power(pdata, on_off);
 		else {
 			bret = 0;
-			LOG("m2usb device name is not support\n");
+			LOG("m2 device name is not support\n");
 		}
 	}
 
 	return bret;
 }
 
-static int m2pcie_device_poweron(int on_off)
+static int ssd_poweron(int on_off)
 {
 	struct customdev_poweron_data *pdata = gpdata;
 	int bret;
-	LOG("m2pcie device %s power ops.\n", pdata->m2dev_name);
+	LOG("ssd power on\n");
 
 	if (pdata) {
-		if(!strcmp(pdata->m2dev_name, M2DEV_SSD))
-			bret = ssd_power(pdata, on_off);
-		else if(!strcmp(pdata->m2dev_name, M2DEV_MODEM_FM150))
-			bret = fm150_power(pdata, on_off);
-		else {
-			bret = 0;
-			LOG("m2pcie device name is not support\n");
-		}
+		bret = ssd_power(pdata, on_off);
 	}
 
 	return bret;
@@ -328,9 +250,7 @@ static int minipcie_device_poweron(int on_off)
 	LOG("m2 device %s power ops.\n", pdata->minipciedev_name);
 
 	if (pdata) {
-		if(!strcmp(pdata->minipciedev_name, MINIPCIEDEV_MODEM_NL668))
-			bret = nl668_power(pdata, on_off);
-		else if(!strcmp(pdata->minipciedev_name, MINIPCIEDEV_MODEM_EC25))
+		if(!strcmp(pdata->minipciedev_name, MINIPCIEDEV_MODEM_EC25))
 			bret = ec25_power(pdata, on_off);
 		else {
 			bret = 0;
@@ -357,18 +277,16 @@ static ssize_t m2dev_onoff_store(struct class *cls,
 		return count;
 	if (new_state == 1) {
 		LOG("%s, c(%d), open m2dev.\n", __func__, new_state);
-		if(pdata->is_m2usbdev_support)
-			m2usb_device_poweron(1);
-		else if(pdata->is_m2pciedev_support){
-			m2pcie_device_poweron(1);
-		}
+		if(pdata->is_m2dev_support)
+			m2_device_poweron(1);
+		else if(pdata->is_ssd_support)
+			ssd_poweron(1);
 	} else if (new_state == 0) {
 		LOG("%s, c(%d), close m2dev.\n", __func__, new_state);
-		if(pdata->is_m2usbdev_support)
-			m2usb_device_poweron(0);
-		else if(pdata->is_m2pciedev_support){
-			m2pcie_device_poweron(0);
-		}
+		if(pdata->is_m2dev_support)
+			m2_device_poweron(0);
+		else if(pdata->is_ssd_support)
+			ssd_poweron(0);
 	} else {
 		LOG("%s, invalid parameter.\n", __func__);
 	}
@@ -433,10 +351,72 @@ static ssize_t minipciedev_name_show(struct class *cls,
 	return sprintf(buf, "%s\n", pdata->minipciedev_name);
 }
 
+static ssize_t m2dev_supportlist_show(struct class *cls,
+				 struct class_attribute *attr,
+				 char *buf)
+{
+	struct customdev_poweron_data *pdata = gpdata;
+
+	ssize_t len = 0;
+	int i = 0;
+	int m2dev_list_len = sizeof(m2dev_support_list) / sizeof(m2dev_support_list[0]);
+
+	for(i=0; i<m2dev_list_len; i++){
+		if (len >= PAGE_SIZE)
+			break;
+		
+		len += snprintf(buf + len, PAGE_SIZE - len, "%s", m2dev_support_list[i]);
+		
+		if (len >= PAGE_SIZE)
+			break;
+		
+		len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+	}
+
+	if (len >= PAGE_SIZE) {
+		pr_warn_once("cpufreq transition table exceeds PAGE_SIZE. Disabling\n");
+		return -EFBIG;
+	}
+
+
+	return len;
+}
+
+static ssize_t minipciedev_supportlist_show(struct class *cls,
+				 struct class_attribute *attr,
+				 char *buf)
+{
+	struct customdev_poweron_data *pdata = gpdata;
+	ssize_t len = 0;
+	int i= 0;
+	int minipciedev_list_len = sizeof(minipciedev_support_list) / sizeof(minipciedev_support_list[0]);
+
+	for(i=0; i<minipciedev_list_len; i++){
+		if (len >= PAGE_SIZE)
+			break;
+		
+		len += snprintf(buf + len, PAGE_SIZE - len, "%s", minipciedev_support_list[i]);
+		
+		if (len >= PAGE_SIZE)
+			break;
+		
+		len += snprintf(buf + len, PAGE_SIZE - len, "\n");
+	}
+
+	if (len >= PAGE_SIZE) {
+		pr_warn_once("cpufreq transition table exceeds PAGE_SIZE. Disabling\n");
+		return -EFBIG;
+	}
+
+	return len;
+}
+
 static CLASS_ATTR_RW(m2dev_onoff);
 static CLASS_ATTR_RO(m2dev_name);
 static CLASS_ATTR_RW(minipciedev_onoff);
 static CLASS_ATTR_RO(minipciedev_name);
+static CLASS_ATTR_RO(m2dev_supportlist);
+static CLASS_ATTR_RO(minipciedev_supportlist);
 
 int get_valid_devname(const char *strings, char* m2dev_name, char* minipciedev_name)
 {
@@ -491,27 +471,13 @@ int get_valid_devname(const char *strings, char* m2dev_name, char* minipciedev_n
 	return 0;
 }
 
-int is_support_m2usbdev(char* m2usbdev_name)
+int is_support_m2dev(char* m2dev_name)
 {
 	int i;
-	int m2usbdev_list_len = sizeof(m2usbdev_support_list) / sizeof(m2usbdev_support_list[0]);
+	int m2dev_list_len = sizeof(m2dev_support_list) / sizeof(m2dev_support_list[0]);
 
-	for(i=0; i<m2usbdev_list_len; i++){
-		if(!strcmp(m2usbdev_name, m2usbdev_support_list[i])){
-			return true;
-		}
-	}
-
-	return false;
-}
-
-int is_support_m2pciedev(char* m2pciedev_name)
-{
-	int i;
-	int m2pciedev_list_len = sizeof(m2pciedev_support_list) / sizeof(m2pciedev_support_list[0]);
-
-	for(i=0; i<m2pciedev_list_len; i++){
-		if(!strcmp(m2pciedev_name, m2pciedev_support_list[i])){
+	for(i=0; i<m2dev_list_len; i++){
+		if(!strcmp(m2dev_name, m2dev_support_list[i])){
 			return true;
 		}
 	}
@@ -522,9 +488,9 @@ int is_support_m2pciedev(char* m2pciedev_name)
 int is_support_minipciedev(char* minipciedev_name)
 {
 	int i;
-	int minipcie_list_len = sizeof(minipciedev_support_list) / sizeof(minipciedev_support_list[0]);
+	int minipciedev_list_len = sizeof(minipciedev_support_list) / sizeof(minipciedev_support_list[0]);
 
-	for(i=0; i<minipcie_list_len; i++){
+	for(i=0; i<minipciedev_list_len; i++){
 		if(!strcmp(minipciedev_name, minipciedev_support_list[i])){
 			return true;
 		}
@@ -560,21 +526,14 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 		return -1;
 	}
 
-	if(is_support_m2usbdev(data->m2dev_name)){
+	if(is_support_m2dev(data->m2dev_name)){
 		//LOG("m2usbdev:%s is support\n", data->m2dev_name);
-		data->is_m2usbdev_support=true;
+		data->is_m2dev_support=true;
 	} else{
-		data->is_m2usbdev_support=false;
+		data->is_m2dev_support=false;
 	}
 
-	if(is_support_m2pciedev(data->m2dev_name)){
-		//LOG("m2pciedev:%s is support\n", data->m2dev_name);
-		data->is_m2pciedev_support=true;
-	} else{
-		data->is_m2pciedev_support=false;
-	}
-
-	if(!data->is_m2pciedev_support && !data->is_m2usbdev_support){
+	if(!data->is_m2dev_support){
 		LOG("m2dev:%s is not support\n", data->m2dev_name);
 		memset(data->m2dev_name, '\0', 32);
 	}
@@ -588,13 +547,13 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 		data->is_minipciedev_support=false;
 	}
 
-	if((data->is_m2usbdev_support==false) && (data->is_minipciedev_support==false) && (data->is_m2pciedev_support==false)){
+	if((data->is_m2dev_support==false) && (data->is_minipciedev_support==false)){
 		//LOG("m2dev and minipciedev is not support\n");
 		return -1;
 	}
 
-	if(data->is_m2usbdev_support || data->is_m2pciedev_support) {
-		data->m2_vbat_gpio = devm_gpiod_get_optional(dev, "m2,vbat", GPIOD_OUT_HIGH);
+	if(data->is_m2dev_support) {
+		data->m2_vbat_gpio = devm_gpiod_get_optional(dev, "m2,vbat", GPIOD_OUT_LOW);
 		if (IS_ERR(data->m2_vbat_gpio)) {
 			ret = PTR_ERR(data->m2_vbat_gpio);
 			dev_err(dev, "failed to request m2,vbat GPIO: %d\n", ret);
@@ -606,26 +565,26 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 			dev_err(dev, "failed to request m2,power GPIO: %d\n", ret);
 			return ret;
 		}
-		data->m2_reset_gpio = devm_gpiod_get_optional(dev, "m2,reset", GPIOD_OUT_LOW);
+		data->m2_reset_gpio = devm_gpiod_get_optional(dev, "m2,reset", GPIOD_OUT_HIGH);
 		if (IS_ERR(data->m2_reset_gpio)) {
 			ret = PTR_ERR(data->m2_reset_gpio);
 			dev_warn(dev, "failed to request m2,reset GPIO: %d\n", ret);
 			return ret;
-		}
-		data->m2_flymode_io = devm_gpiod_get_optional(dev, "m2,flymode-io", GPIOD_OUT_HIGH);
-		if (IS_ERR(data->m2_flymode_io)) {
-			ret = PTR_ERR(data->m2_flymode_io);
-			dev_warn(dev, "failed to request m2,flymode GPIO: %d\n", ret);
 		}
 		data->m2_wakein_gpio = devm_gpiod_get_optional(dev, "m2,wake-in", GPIOD_IN);
 		if (IS_ERR(data->m2_wakein_gpio)) {
 			ret = PTR_ERR(data->m2_wakein_gpio);
 			dev_warn(dev, "failed to request m2,wakein GPIO: %d\n", ret);
 		}
+		data->m2_ssd_sel_gpio = devm_gpiod_get_optional(dev, "m2,ssdsel", GPIOD_OUT_HIGH);
+		if (IS_ERR(data->m2_ssd_sel_gpio)) {
+			ret = PTR_ERR(data->m2_ssd_sel_gpio);
+			dev_warn(dev, "failed to request m2,ssdsel GPIO: %d\n", ret);
+		}
 	}
 
 	if(data->is_minipciedev_support){
-		data->minipcie_vbat_gpio = devm_gpiod_get_optional(dev, "minipcie,vbat", GPIOD_OUT_HIGH);
+		data->minipcie_vbat_gpio = devm_gpiod_get_optional(dev, "minipcie,vbat", GPIOD_OUT_LOW);
 		if (IS_ERR(data->minipcie_vbat_gpio)) {
 			ret = PTR_ERR(data->minipcie_vbat_gpio);
 			dev_err(dev, "failed to request minipcie,vbat GPIO: %d\n", ret);
@@ -637,29 +596,19 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 			dev_err(dev, "failed to request minipcie,power GPIO: %d\n", ret);
 			return ret;
 		}
-		data->minipcie_wakeout_gpio = devm_gpiod_get_optional(dev, "minipcie,wake-out", GPIOD_OUT_HIGH);
-		if (IS_ERR(data->minipcie_wakeout_gpio)) {
-			ret = PTR_ERR(data->minipcie_wakeout_gpio);
-			dev_err(dev, "failed to request minipcie,wakeout GPIO: %d\n", ret);
-		}
 		data->minipcie_wakein_gpio = devm_gpiod_get_optional(dev, "minipcie,wake-in", GPIOD_IN);
 		if (IS_ERR(data->minipcie_wakein_gpio)) {
 			ret = PTR_ERR(data->minipcie_wakein_gpio);
 			dev_err(dev, "failed to request minipcie,wakein GPIO: %d\n", ret);
-		}
-		data->minipcie_flymode_io = devm_gpiod_get_optional(dev, "minipcie,flymode-io", GPIOD_OUT_HIGH);
-		if (IS_ERR(data->minipcie_flymode_io)) {
-			ret = PTR_ERR(data->minipcie_flymode_io);
-			dev_err(dev, "failed to request minipcie,flymode GPIO: %d\n", ret);
 		}
 	}
 
 	return 0;
 }
 
-static int m2usb_power_on_thread(void *data)
+static int m2_power_on_thread(void *data)
 {
-	m2usb_device_poweron(1);
+	m2_device_poweron(1);
 	return 0;
 }
 
@@ -686,12 +635,16 @@ static int custom_device_poweron_probe(struct platform_device *pdev)
 	gpdata = pdata;
 	pdata->dev = &pdev->dev;
 
-	if(pdata->is_m2usbdev_support){
-		kthread_m2 = kthread_run(m2usb_power_on_thread, NULL, "m2usb_power_on_thread");
-		if (IS_ERR(kthread_m2)) {
-			LOG("%s: create m2usb_power_on_thread failed.\n",  __func__);
-			ret = PTR_ERR(kthread_m2);
-			goto err;
+	if(pdata->is_m2dev_support){
+		if(!pdata->is_ssd_support){
+			kthread_m2 = kthread_run(m2_power_on_thread, NULL, "m2usb_power_on_thread");
+			if (IS_ERR(kthread_m2)) {
+				LOG("%s: create m2_power_on_thread failed.\n",  __func__);
+				ret = PTR_ERR(kthread_m2);
+				goto err;
+			} else {
+				ssd_poweron(1);
+			}
 		}
 	}
 
@@ -704,9 +657,6 @@ static int custom_device_poweron_probe(struct platform_device *pdev)
 		}
 	}
 	
-	if(pdata->is_m2pciedev_support)
-		m2pcie_device_poweron(1);
-
 	return 0;
 err:
 	devm_kfree(&pdev->dev, pdata);
@@ -727,17 +677,21 @@ static int custom__device_poweron_resume(struct platform_device *pdev)
 static int custom__device_poweron_remove(struct platform_device *pdev)
 {
 	struct customdev_poweron_data *pdata = gpdata;
-	if(pdata->is_m2usbdev_support || pdata->is_m2pciedev_support) {
+	if(pdata->is_m2dev_support || pdata->is_ssd_support) {
 		if (pdata->m2_power_gpio) {
-			gpiod_direction_output(pdata->m2_power_gpio, 0);
+			gpiod_direction_output(pdata->m2_power_gpio, 1);
 		}
 
 		if (pdata->m2_reset_gpio) {
-			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
 		}
 
 		if (pdata->m2_vbat_gpio) {
 			gpiod_direction_output(pdata->m2_vbat_gpio, 0);
+		}
+
+		if (pdata->m2_ssd_sel_gpio) {
+			gpiod_direction_output(pdata->m2_ssd_sel_gpio, 1);
 		}
 	}
 
@@ -788,6 +742,12 @@ static int __init custom_device_poweron_init(void)
 	if (ret)
 		LOG("Fail to create class minipciedev_onoff.\n");
 	ret =  class_create_file(customdev_class, &class_attr_minipciedev_name);
+	if (ret)
+		LOG("Fail to create class minipciedev_name.\n");
+	ret =  class_create_file(customdev_class, &class_attr_m2dev_supportlist);
+	if (ret)
+		LOG("Fail to create class minipciedev_name.\n");
+	ret =  class_create_file(customdev_class, &class_attr_minipciedev_supportlist);
 	if (ret)
 		LOG("Fail to create class minipciedev_name.\n");
 	return platform_driver_register(&custom_device_poweron_driver);

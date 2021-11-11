@@ -89,16 +89,14 @@
 		devname="";
 		m2,vbat-gpio = <&gpio0 RK_PD4 GPIO_ACTIVE_HIGH>;
 		m2,power-gpio = <&gpio1 RK_PD2 GPIO_ACTIVE_HIGH>;
-		m2,reset-gpio = <&gpio1 RK_PD1 GPIO_ACTIVE_HIGH>;
-		m2,flymode-io = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
+		m2,reset-gpio = <&gpio3 RK_PB5 GPIO_ACTIVE_HIGH>;
 		m2,wake-in = <&gpio0 RK_PB7 GPIO_ACTIVE_HIGH>;
+		m2,ssdsel-gpio = <&gpio1 RK_PD0 GPIO_ACTIVE_HIGH>;
 		minipcie,vbat-gpio = <&gpio0 RK_PC5 GPIO_ACTIVE_HIGH>;
 		minipcie,reset-gpio = <&gpio3 RK_PD4 GPIO_ACTIVE_HIGH>;
-		minipcie,wake-out = <&gpio1 RK_PD0 GPIO_ACTIVE_HIGH>;
 		minipcie,wake-in = <&gpio0 RK_PC1 GPIO_ACTIVE_HIGH>;
-		minipcie,flymode-io = <&gpio3 RK_PD5 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&m2_onoff &m2_reset &m2_flymode_io &m2_wake_in &minipcie_wake_out &minipcie_wake_in &minipcie_flymode_io>;
+		pinctrl-0 = <&m2_onoff &m2_power &m2_reset &m2_wake_in &minipcie_power &minipcie_reset &minipcie_wake_in &m2_ssdsel>;
 		status = "okay";
 	};
 };
@@ -418,28 +416,32 @@
 			rockchip,pins = <1 RK_PD2 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 
+		m2_power: m2-power {
+			rockchip,pins = <0 RK_PD4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
 		m2_reset: m2-reset {
 			rockchip,pins = <1 RK_PD1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 
-		m2_flymode_io: m2-flymode-io {
-			rockchip,pins = <3 RK_PC1 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-
 		m2_wake_in: m2-wake-in {
 			rockchip,pins = <0 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
- 
-		minipcie_wake_out: minipcie-wake-out {
-			rockchip,pins = <1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
 		minipcie_wake_in: minipcie-wake-in {
 			rockchip,pins = <0 RK_PC1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
-		minipcie_flymode_io: minipcie-flymode-io {
-			rockchip,pins = <3 RK_PD5 RK_FUNC_GPIO &pcfg_pull_up>;
+		minipcie_reset: minipcie-reset {
+			rockchip,pins = <3 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		minipcie_power: minipcie-power {
+			rockchip,pins = <0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		m2_ssdsel: m2-ssdsel {
+			rockchip,pins = <1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };
