@@ -23,10 +23,10 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 
-#define M2DEV_MODEM_EM06    "4g-em06"
-#define M2DEV_MODEM_RM500Q  "5g-rm500q"
+#define M2DEV_MODEM_EM06    "4G-EM06"
+#define M2DEV_MODEM_RM500Q  "5G-RM500Q"
 
-#define MINIPCIEDEV_MODEM_EC25  "4g-ec25"
+#define MINIPCIEDEV_MODEM_EC25  "4G-EC25"
 
 #define LOG(x...)   pr_info("[customdev]: " x)
 
