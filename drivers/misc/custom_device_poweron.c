@@ -190,7 +190,6 @@ static int rm500q_power(struct customdev_poweron_data *pdata, int on_off)
 			msleep(800);
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 		}
-
 	} else {
 		if (pdata->m2_power_gpio) {
 			gpiod_direction_output(pdata->m2_power_gpio, 1);
@@ -214,7 +213,7 @@ static int m2_device_poweron(int on_off)
 {
 	struct customdev_poweron_data *pdata = gpdata;
 	int bret;
-	LOG("m2usb device %s power ops.\n", pdata->m2dev_name);
+	LOG("m2 device %s power ops.\n", pdata->m2dev_name);
 
 	if (pdata) {
 		if(!strcmp(pdata->m2dev_name, M2DEV_MODEM_EM06))
@@ -277,16 +276,20 @@ static ssize_t m2dev_onoff_store(struct class *cls,
 		return count;
 	if (new_state == 1) {
 		LOG("%s, c(%d), open m2dev.\n", __func__, new_state);
-		if(pdata->is_m2dev_support)
-			m2_device_poweron(1);
-		else if(pdata->is_ssd_support)
-			ssd_poweron(1);
+		if(pdata->is_m2dev_support) {
+			if(pdata->is_ssd_support)
+				ssd_poweron(1);
+			else
+				m2_device_poweron(1);
+		}	
 	} else if (new_state == 0) {
 		LOG("%s, c(%d), close m2dev.\n", __func__, new_state);
-		if(pdata->is_m2dev_support)
-			m2_device_poweron(0);
-		else if(pdata->is_ssd_support)
-			ssd_poweron(0);
+		if(pdata->is_m2dev_support){
+			if(pdata->is_ssd_support)
+				ssd_poweron(0);
+			else
+				m2_device_poweron(0);
+		}	
 	} else {
 		LOG("%s, invalid parameter.\n", __func__);
 	}
@@ -485,6 +488,14 @@ int is_support_m2dev(char* m2dev_name)
 	return false;
 }
 
+int is_support_ssd(char* m2dev_name)
+{
+	if(!strcmp(m2dev_name, "SSD")){
+		return true;
+	}
+	return false;
+}
+
 int is_support_minipciedev(char* minipciedev_name)
 {
 	int i;
@@ -529,6 +540,10 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 	if(is_support_m2dev(data->m2dev_name)){
 		//LOG("m2usbdev:%s is support\n", data->m2dev_name);
 		data->is_m2dev_support=true;
+		if(is_support_ssd(data->m2dev_name))
+			data->is_ssd_support=true;
+		else
+			data->is_ssd_support=false;
 	} else{
 		data->is_m2dev_support=false;
 	}
@@ -559,6 +574,7 @@ static int custom_device_poweron_platdata_parse_dt(struct device *dev,
 			dev_err(dev, "failed to request m2,vbat GPIO: %d\n", ret);
 			return ret;
 		}
+
 		data->m2_power_gpio = devm_gpiod_get_optional(dev, "m2,power", GPIOD_OUT_HIGH);
 		if (IS_ERR(data->m2_power_gpio)) {
 			ret = PTR_ERR(data->m2_power_gpio);
@@ -642,9 +658,9 @@ static int custom_device_poweron_probe(struct platform_device *pdev)
 				LOG("%s: create m2_power_on_thread failed.\n",  __func__);
 				ret = PTR_ERR(kthread_m2);
 				goto err;
-			} else {
+			} 
+		} else {
 				ssd_poweron(1);
-			}
 		}
 	}
 

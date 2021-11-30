@@ -417,7 +417,7 @@
 		};
 
 		m2_power: m2-power {
-			rockchip,pins = <0 RK_PD4 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
 		m2_reset: m2-reset {
