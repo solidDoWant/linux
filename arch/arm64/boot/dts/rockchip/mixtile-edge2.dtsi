@@ -238,7 +238,7 @@
 	rx_delay = <0x2f>;
 
 	phy-handle = <&rgmii_phy0>;
-	status = "okay";
+	status = "disabled";
 };
 
 &gmac1 {
