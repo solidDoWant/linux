@@ -27,6 +27,7 @@
 #define M2DEV_MODEM_RM500Q  "5G-RM500Q"
 
 #define MINIPCIEDEV_MODEM_EC25  "4G-EC25"
+#define MINIPCIEDEV_LORA_RAK5146  "LORA-RAK5146"
 
 #define LOG(x...)   pr_info("[customdev]: " x)
 
@@ -57,7 +58,8 @@ static char *m2dev_support_list[] = {"SSD",
 				 "4G-EM06"
 				 };
 
-static char *minipciedev_support_list[] = {"4G-EC25"
+static char *minipciedev_support_list[] = {"4G-EC25",
+				"LORA-RAK5146"
 				 };
 
 static int ec25_power(struct customdev_poweron_data *pdata, int on_off)
@@ -73,6 +75,36 @@ static int ec25_power(struct customdev_poweron_data *pdata, int on_off)
 			msleep(10);
 			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
 			msleep(250);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
+		}
+
+	} else {
+		if (pdata->minipcie_reset_gpio) {
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
+			msleep(10);
+		}
+
+		if (pdata->minipcie_vbat_gpio) {
+			gpiod_direction_output(pdata->minipcie_vbat_gpio, 0);
+		}
+	}
+
+	return 0;
+}
+
+static int rak5146_power(struct customdev_poweron_data *pdata, int on_off)
+{
+	if(on_off) {
+		if (pdata->minipcie_vbat_gpio) {
+			gpiod_direction_output(pdata->minipcie_vbat_gpio, 1);
+			msleep(10);
+		}
+
+		if (pdata->minipcie_reset_gpio) {
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
+			msleep(10);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
+			msleep(1);
 			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
 		}
 
@@ -251,6 +283,8 @@ static int minipcie_device_poweron(int on_off)
 	if (pdata) {
 		if(!strcmp(pdata->minipciedev_name, MINIPCIEDEV_MODEM_EC25))
 			bret = ec25_power(pdata, on_off);
+		else if(!strcmp(pdata->minipciedev_name, MINIPCIEDEV_LORA_RAK5146))
+			bret = rak5146_power(pdata, on_off);
 		else {
 			bret = 0;
 			LOG("minipcie device name is not support\n");
