@@ -930,7 +930,8 @@ release_cluster_info:
 	}
 	return ret;
 }
-module_init(rockchip_cpufreq_driver_init);
+// module_init(rockchip_cpufreq_driver_init);
+late_initcall(rockchip_cpufreq_driver_init);
 
 MODULE_AUTHOR("Finley Xiao <finley.xiao@rock-chips.com>");
 MODULE_DESCRIPTION("Rockchip cpufreq driver");
