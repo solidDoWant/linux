@@ -219,7 +219,7 @@ static int rm500q_power(struct customdev_poweron_data *pdata, int on_off)
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 			msleep(30);
 			gpiod_direction_output(pdata->m2_reset_gpio, 1);
-			msleep(800);
+			msleep(400);
 			gpiod_direction_output(pdata->m2_reset_gpio, 0);
 		}
 	} else {
@@ -448,12 +448,69 @@ static ssize_t minipciedev_supportlist_show(struct class *cls,
 	return len;
 }
 
+static ssize_t m2dev_reset_store(struct class *cls,
+				  struct class_attribute *attr,
+				  const char *buf, size_t count)
+{
+	int ret;
+	struct customdev_poweron_data *pdata = gpdata;
+
+	printk("m2dev reset %s start\n", buf);
+	if (!strncmp(buf, "RM500Q", strlen("RM500Q"))) {
+		if (pdata->m2_reset_gpio) {
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			msleep(30);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
+			msleep(400);
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+		}
+	} else if (!strncmp(buf, "EM06", strlen("EM06"))) {
+		if (pdata->m2_reset_gpio) {
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+			msleep(30);
+			gpiod_direction_output(pdata->m2_reset_gpio, 1);
+			msleep(400);
+			gpiod_direction_output(pdata->m2_reset_gpio, 0);
+		}
+	} else {
+		LOG("%s, reset device (%s) not support\n", __func__, buf);
+	}
+
+	return count;
+}
+
+
+static ssize_t minipciedev_reset_store(struct class *cls,
+				  struct class_attribute *attr,
+				  const char *buf, size_t count)
+{
+	int ret;
+	struct customdev_poweron_data *pdata = gpdata;
+
+	printk("minipcie reset %s start\n", buf);
+	if (!strncmp(buf, "EC25", strlen("EC25"))) {
+		if (pdata->minipcie_reset_gpio) {
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
+			msleep(30);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 1);
+			msleep(300);
+			gpiod_direction_output(pdata->minipcie_reset_gpio, 0);
+		}
+	} else {
+		LOG("%s, reset device (%s) not support\n", __func__, buf);
+	}
+	
+	return count;
+}
+
 static CLASS_ATTR_RW(m2dev_onoff);
 static CLASS_ATTR_RO(m2dev_name);
 static CLASS_ATTR_RW(minipciedev_onoff);
 static CLASS_ATTR_RO(minipciedev_name);
 static CLASS_ATTR_RO(m2dev_supportlist);
 static CLASS_ATTR_RO(minipciedev_supportlist);
+static CLASS_ATTR_WO(m2dev_reset);
+static CLASS_ATTR_WO(minipciedev_reset);
 
 int get_valid_devname(const char *strings, char* m2dev_name, char* minipciedev_name)
 {
@@ -800,6 +857,12 @@ static int __init custom_device_poweron_init(void)
 	ret =  class_create_file(customdev_class, &class_attr_minipciedev_supportlist);
 	if (ret)
 		LOG("Fail to create class minipciedev_name.\n");
+	ret =  class_create_file(customdev_class, &class_attr_m2dev_reset);
+	if (ret)
+		LOG("Fail to create class m2dev_reset.\n");
+	ret =  class_create_file(customdev_class, &class_attr_minipciedev_reset);
+	if (ret)
+		LOG("Fail to create class minipciedev_reset.\n");
 	return platform_driver_register(&custom_device_poweron_driver);
 }
 
