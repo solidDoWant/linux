@@ -664,12 +664,12 @@ static int rockchip_pcie_ep_probe(struct platform_device *pdev)
 			 * more for Gen switch.
 			 */
 			msleep(2000);
-			dev_info(dev, "PCIe Link up, LTSSM is 0x%x\n",
+			dev_info(dev, "PCIe EP Link up, LTSSM is 0x%x\n",
 				 rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_LTSSM_STATUS));
 			break;
 		}
 
-		dev_info_ratelimited(dev, "PCIe Linking... LTSSM is 0x%x\n",
+		dev_info_ratelimited(dev, "PCIe EP Linking... LTSSM is 0x%x\n",
 				     rockchip_pcie_readl_apb(rockchip, PCIE_CLIENT_LTSSM_STATUS));
 		msleep(20);
 	}
@@ -709,10 +709,13 @@ static struct platform_driver rk_plat_pcie_driver = {
 		.of_match_table = rk_pcie_ep_of_match,
 		.suppress_bind_attrs = true,
 	},
+	.probe = rockchip_pcie_ep_probe,
 };
 
-module_platform_driver_probe(rk_plat_pcie_driver,
-					 rockchip_pcie_ep_probe);
+// module_platform_driver_probe(rk_plat_pcie_driver,
+// 					 rockchip_pcie_ep_probe);
+
+module_platform_driver(rk_plat_pcie_driver);
 
 MODULE_AUTHOR("Simon Xue <xxm@rock-chips.com>");
 MODULE_DESCRIPTION("RockChip PCIe Controller EP driver");
