@@ -21,6 +21,26 @@
 #include <linux/timer.h>
 
 #define MAX_PWM 255
+#define DEV_MAX_NUMS 255
+
+struct __thermal_zone {
+	int passive_delay;
+	int polling_delay;
+	int slope;
+	int offset;
+
+	/* trip data */
+	int ntrips;
+	struct thermal_trip *trips;
+
+	/* cooling binding data */
+	int num_tbps;
+	struct __thermal_bind_params *tbps;
+
+	/* sensor interface */
+	void *sensor_data;
+	const struct thermal_zone_of_device_ops *ops;
+};
 
 struct pwm_fan_ctx {
 	struct mutex lock;
@@ -41,35 +61,36 @@ struct pwm_fan_ctx {
 	struct thermal_cooling_device *cdev;
 };
 
+struct device_fan {
+	int index;
+	struct pwm_fan_ctx *fan_ctx[DEV_MAX_NUMS];
+}device_fan;
+
 /* This handler assumes self resetting edge triggered interrupt. */
 static irqreturn_t pulse_handler(int irq, void *dev_id)
 {
 	struct pwm_fan_ctx *ctx = dev_id;
-
 	atomic_inc(&ctx->pulses);
-
 	return IRQ_HANDLED;
 }
 
-static void sample_timer(struct timer_list *t)
+static int fan_get_temp(int *temp)
 {
-	struct pwm_fan_ctx *ctx = from_timer(ctx, t, rpm_timer);
-	unsigned int delta = ktime_ms_delta(ktime_get(), ctx->sample_start);
-	int pulses;
+	struct __thermal_zone *data;
+	struct thermal_zone_device *dz;
 
-	if (delta) {
-		pulses = atomic_read(&ctx->pulses);
-		atomic_sub(pulses, &ctx->pulses);
-		ctx->rpm = (unsigned int)(pulses * 1000 * 60) /
-			(ctx->pulses_per_revolution * delta);
-
-		ctx->sample_start = ktime_get();
+	dz = thermal_zone_get_zone_by_name("soc-thermal");
+	if (!dz) {
+		printk(KERN_INFO "%s %s line is %d dz is null\r\n", __FILE__, __FUNCTION__, __LINE__);
 	}
-
-	mod_timer(&ctx->rpm_timer, jiffies + HZ);
+	data = (struct __thermal_zone *)(dz->devdata);
+	if (!data->ops || !data->ops->get_temp) {
+		return -EINVAL;
+	}
+	return data->ops->get_temp(data->sensor_data, temp);
 }
 
-static int  __set_pwm(struct pwm_fan_ctx *ctx, unsigned long pwm)
+static int __set_pwm(struct pwm_fan_ctx *ctx, unsigned long pwm)
 {
 	unsigned long period;
 	int ret = 0;
@@ -87,6 +108,7 @@ static int  __set_pwm(struct pwm_fan_ctx *ctx, unsigned long pwm)
 	ret = pwm_apply_state(ctx->pwm, &state);
 	if (!ret)
 		ctx->pwm_value = pwm;
+
 exit_set_pwm_err:
 	mutex_unlock(&ctx->lock);
 	return ret;
@@ -121,33 +143,30 @@ static ssize_t pwm_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static ssize_t pwm_show(struct device *dev, struct device_attribute *attr,
-			char *buf)
+static ssize_t pwm_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct pwm_fan_ctx *ctx = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%u\n", ctx->pwm_value);
 }
 
-static ssize_t rpm_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+static ssize_t rpm_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct pwm_fan_ctx *ctx = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%u\n", ctx->rpm);
 }
 
-static SENSOR_DEVICE_ATTR_RW(pwm1, pwm, 0);
-static SENSOR_DEVICE_ATTR_RO(fan1_input, rpm, 0);
+static SENSOR_DEVICE_ATTR_RW(fan_pwm, pwm, 0);
+static SENSOR_DEVICE_ATTR_RO(fan_rpm, rpm, 0);
 
 static struct attribute *pwm_fan_attrs[] = {
-	&sensor_dev_attr_pwm1.dev_attr.attr,
-	&sensor_dev_attr_fan1_input.dev_attr.attr,
+	&sensor_dev_attr_fan_pwm.dev_attr.attr,
+	&sensor_dev_attr_fan_rpm.dev_attr.attr,
 	NULL,
 };
 
-static umode_t pwm_fan_attrs_visible(struct kobject *kobj, struct attribute *a,
-				     int n)
+static umode_t pwm_fan_attrs_visible(struct kobject *kobj, struct attribute *a, int n)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);
 	struct pwm_fan_ctx *ctx = dev_get_drvdata(dev);
@@ -170,8 +189,7 @@ static const struct attribute_group *pwm_fan_groups[] = {
 };
 
 /* thermal cooling device callbacks */
-static int pwm_fan_get_max_state(struct thermal_cooling_device *cdev,
-				 unsigned long *state)
+static int pwm_fan_get_max_state(struct thermal_cooling_device *cdev, unsigned long *state)
 {
 	struct pwm_fan_ctx *ctx = cdev->devdata;
 
@@ -183,8 +201,7 @@ static int pwm_fan_get_max_state(struct thermal_cooling_device *cdev,
 	return 0;
 }
 
-static int pwm_fan_get_cur_state(struct thermal_cooling_device *cdev,
-				 unsigned long *state)
+static int pwm_fan_get_cur_state(struct thermal_cooling_device *cdev, unsigned long *state)
 {
 	struct pwm_fan_ctx *ctx = cdev->devdata;
 
@@ -196,8 +213,7 @@ static int pwm_fan_get_cur_state(struct thermal_cooling_device *cdev,
 	return 0;
 }
 
-static int
-pwm_fan_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
+static int pwm_fan_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	struct pwm_fan_ctx *ctx = cdev->devdata;
 	int ret;
@@ -217,6 +233,27 @@ pwm_fan_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 	ctx->pwm_fan_state = state;
 
 	return ret;
+}
+
+static int pwm_fan_monitor_fan(int temperature, unsigned int *pwm_val)
+{
+    if(temperature > 0 && temperature <= 20000) {
+        *pwm_val = 0;
+    }
+    else if(temperature > 20000 && temperature <= 30000) {
+        *pwm_val = 50;
+    }
+    else if(temperature > 30000 && temperature <= 40000) {
+        *pwm_val = 100;
+    }
+    else if(temperature > 40000 && temperature <= 50000) {
+        *pwm_val = 200;
+    }
+    else if(temperature > 50000) {
+        *pwm_val = 255;
+    }
+
+    return 0;
 }
 
 static const struct thermal_cooling_device_ops pwm_fan_cooling_ops = {
@@ -278,6 +315,40 @@ static void pwm_fan_pwm_disable(void *__ctx)
 	del_timer_sync(&ctx->rpm_timer);
 }
 
+static void sample_timer(struct timer_list *t)
+{
+	struct pwm_fan_ctx *ctx = from_timer(ctx, t, rpm_timer);
+	unsigned int delta = ktime_ms_delta(ktime_get(), ctx->sample_start);
+	int pulses, temp, ret;
+	unsigned int pwm_val;
+
+	if (delta) {
+		pulses = atomic_read(&ctx->pulses);
+		atomic_sub(pulses, &ctx->pulses);
+		ctx->rpm = (unsigned int)(pulses * 1000 * 60) /
+			(ctx->pulses_per_revolution * delta);
+		ctx->sample_start = ktime_get();
+	}
+	if (fan_get_temp(&temp)) {
+		printk(KERN_INFO "%s %s line is %d get temp fail\r\n", __FILE__, __FUNCTION__, __LINE__);
+		goto out;
+	}
+
+	pwm_fan_monitor_fan(temp, &pwm_val);
+	if (!(device_fan.fan_ctx[0])) {
+		printk(KERN_INFO "%s %s line is %d no find fan_ctx\r\n", __FILE__, __FUNCTION__, __LINE__);
+		goto out;
+	}
+
+	ret = __set_pwm(device_fan.fan_ctx[0], pwm_val);
+	if (ret) {
+		printk(KERN_INFO "%s %s line is %d Cannot set pwm!\r\n", __FILE__, __FUNCTION__, __LINE__);
+	}
+
+out:
+	mod_timer(&ctx->rpm_timer, jiffies + HZ);
+}
+
 static int pwm_fan_probe(struct platform_device *pdev)
 {
 	struct thermal_cooling_device *cdev;
@@ -292,6 +363,12 @@ static int pwm_fan_probe(struct platform_device *pdev)
 	if (!ctx)
 		return -ENOMEM;
 
+	if (device_fan.index >= 0 && device_fan.index < DEV_MAX_NUMS) {
+		device_fan.fan_ctx[device_fan.index++] = ctx;
+	} else {
+		printk(KERN_INFO "%s %s line is %d device max nums is 255\r\n", __FILE__, __FUNCTION__, __LINE__);
+		return -EINVAL;
+	}
 	mutex_init(&ctx->lock);
 
 	ctx->pwm = devm_of_pwm_get(dev, dev->of_node, NULL);
@@ -323,7 +400,6 @@ static int pwm_fan_probe(struct platform_device *pdev)
 	}
 
 	ctx->pwm_value = MAX_PWM;
-
 	pwm_init_state(ctx->pwm, &state);
 	/*
 	 * __set_pwm assumes that MAX_PWM * (period - 1) fits into an unsigned
@@ -344,6 +420,7 @@ static int pwm_fan_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to configure PWM: %d\n", ret);
 		return ret;
 	}
+
 	timer_setup(&ctx->rpm_timer, sample_timer, 0);
 	ret = devm_add_action_or_reset(dev, pwm_fan_pwm_disable, ctx);
 	if (ret)
@@ -373,7 +450,6 @@ static int pwm_fan_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to register hwmon device\n");
 		return PTR_ERR(hwmon);
 	}
-
 	ret = pwm_fan_of_get_cooling_data(dev, ctx);
 	if (ret)
 		return ret;

@@ -233,14 +233,14 @@
 
 	fan: pwm-fan {
 		compatible = "pwm-fan";
-		interrupt-parent = <&gpio1>;
-		interrupts = <RK_PD7 IRQ_TYPE_EDGE_FALLING>;
-		cooling-levels = <0 150 200 255>;
-		#cooling-cells = <2>;
-		fan-supply = <&vcc12v_dcin>;
+
+		interrupt-parent = <&gpio3>;
+		interrupts = <RK_PB1 IRQ_TYPE_EDGE_FALLING>;
 		pulses-per-revolution = <2>;
-		pwms = <&pwm14 0 40000 0>;
-	};
+
+		#cooling-cells = <2>;
+		pwms = <&pwm8 0 50000 0>;
+    };
 };
 
 /*&pwrkey {
@@ -657,7 +657,7 @@
 	status = "okay";
 };
 
-&dp0_in_vp2 {
+&dp0_in_vp1 {
 	status = "okay";
 };
 
