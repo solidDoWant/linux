@@ -237,20 +237,15 @@ static int pwm_fan_set_cur_state(struct thermal_cooling_device *cdev, unsigned l
 
 static int pwm_fan_monitor_fan(int temperature, unsigned int *pwm_val)
 {
-    if(temperature > 0 && temperature <= 20000) {
-        *pwm_val = 0;
-    }
-    else if(temperature > 20000 && temperature <= 30000) {
-        *pwm_val = 50;
-    }
-    else if(temperature > 30000 && temperature <= 40000) {
-        *pwm_val = 100;
-    }
-    else if(temperature > 40000 && temperature <= 50000) {
+	unsigned int max_temp = 60000;
+	unsigned int min_temp = 35000;
+
+	if (temperature > max_temp) {
         *pwm_val = 200;
-    }
-    else if(temperature > 50000) {
-        *pwm_val = 255;
+	} else if (temperature < min_temp) {
+		*pwm_val = 0;
+	} else {
+		*pwm_val = (temperature - min_temp) * 200 / (max_temp - min_temp);
     }
 
     return 0;
@@ -324,10 +319,8 @@ static void sample_timer(struct timer_list *t)
 
 	if (delta) {
 		pulses = atomic_read(&ctx->pulses);
-		atomic_sub(pulses, &ctx->pulses);
 		ctx->rpm = (unsigned int)(pulses * 1000 * 60) /
 			(ctx->pulses_per_revolution * delta);
-		ctx->sample_start = ktime_get();
 	}
 	if (fan_get_temp(&temp)) {
 		printk(KERN_INFO "%s %s line is %d get temp fail\r\n", __FILE__, __FUNCTION__, __LINE__);
@@ -346,6 +339,9 @@ static void sample_timer(struct timer_list *t)
 	}
 
 out:
+	pulses = atomic_read(&ctx->pulses);
+	atomic_sub(pulses, &ctx->pulses);
+	ctx->sample_start = ktime_get();
 	mod_timer(&ctx->rpm_timer, jiffies + HZ);
 }
 
