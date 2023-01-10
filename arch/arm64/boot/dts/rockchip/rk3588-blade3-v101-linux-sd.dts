@@ -239,7 +239,7 @@
 		pulses-per-revolution = <2>;
 
 		#cooling-cells = <2>;
-		pwms = <&pwm8 0 50000 0>;
+		pwms = <&pwm8 0 40000 0>;
     };
 };
 
@@ -902,6 +902,12 @@
 &i2c5 { // 30PIN GPIO
 	status = "disabled";
 	pinctrl-0 = <&i2c5m3_xfer>;
+};
+
+&pwm8 { // 30PIN GPIO
+    pinctrl-names = "active";
+	status = "okay";
+	pinctrl-0 = <&pwm8m2_pins>;
 };
 
 &pwm14 { // 30PIN GPIO
