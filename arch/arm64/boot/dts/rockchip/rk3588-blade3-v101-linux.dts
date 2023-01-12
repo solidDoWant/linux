@@ -896,6 +896,12 @@
 	pinctrl-0 = <&i2c5m3_xfer>;
 };
 
+&pwm8 { // 30PIN GPIO
+    pinctrl-names = "active";
+	status = "okay";
+	pinctrl-0 = <&pwm8m2_pins>;
+};
+
 &pwm14 { // 30PIN GPIO
 	status = "okay";
 	pinctrl-0 = <&pwm14m2_pins>;
