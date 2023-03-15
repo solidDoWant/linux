@@ -680,34 +680,49 @@ static const struct rkcif_hw_match_data rk3568_cif_match_data = {
 
 
 static const struct of_device_id rkcif_plat_of_match[] = {
+#ifdef CONFIG_CPU_PX30
 	{
 		.compatible = "rockchip,px30-cif",
 		.data = &px30_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK1808
 	{
 		.compatible = "rockchip,rk1808-cif",
 		.data = &rk1808_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK312X
 	{
 		.compatible = "rockchip,rk3128-cif",
 		.data = &rk3128_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK3288
 	{
 		.compatible = "rockchip,rk3288-cif",
 		.data = &rk3288_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK3328
 	{
 		.compatible = "rockchip,rk3328-cif",
 		.data = &rk3328_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK3368
 	{
 		.compatible = "rockchip,rk3368-cif",
 		.data = &rk3368_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RK3568
 	{
 		.compatible = "rockchip,rk3568-cif",
 		.data = &rk3568_cif_match_data,
 	},
+#endif
+#ifdef CONFIG_CPU_RV1126
 	{
 		.compatible = "rockchip,rv1126-cif",
 		.data = &rv1126_cif_match_data,
@@ -716,6 +731,7 @@ static const struct of_device_id rkcif_plat_of_match[] = {
 		.compatible = "rockchip,rv1126-cif-lite",
 		.data = &rv1126_cif_lite_match_data,
 	},
+#endif
 	{},
 };
 
@@ -724,10 +740,13 @@ static irqreturn_t rkcif_irq_handler(int irq, void *ctx)
 	struct device *dev = ctx;
 	struct rkcif_hw *cif_hw = dev_get_drvdata(dev);
 	int i;
+	struct rkcif_device *tmp_dev = NULL;
 
 	for (i = 0; i < cif_hw->dev_num; i++) {
-		if (cif_hw->cif_dev[i]->isr_hdl)
-			cif_hw->cif_dev[i]->isr_hdl(irq, cif_hw->cif_dev[i]);
+		tmp_dev = cif_hw->cif_dev[i];
+		if (tmp_dev->isr_hdl &&
+		    (atomic_read(&tmp_dev->pipe.stream_cnt) != 0))
+			tmp_dev->isr_hdl(irq, tmp_dev);
 	}
 
 	return IRQ_HANDLED;
@@ -765,7 +784,7 @@ err:
 static void rkcif_iommu_cleanup(struct rkcif_hw *cif_hw)
 {
 	if (cif_hw->domain)
-		cif_hw->domain->ops->detach_dev(cif_hw->domain, cif_hw->dev);
+		iommu_detach_device(cif_hw->domain, cif_hw->dev);
 }
 
 static void rkcif_iommu_enable(struct rkcif_hw *cif_hw)
@@ -774,7 +793,7 @@ static void rkcif_iommu_enable(struct rkcif_hw *cif_hw)
 		cif_hw->domain = iommu_get_domain_for_dev(cif_hw->dev);
 
 	if (cif_hw->domain)
-		cif_hw->domain->ops->attach_dev(cif_hw->domain, cif_hw->dev);
+		iommu_attach_device(cif_hw->domain, cif_hw->dev);
 }
 
 static inline bool is_iommu_enable(struct device *dev)
@@ -942,6 +961,8 @@ static int rkcif_plat_hw_probe(struct platform_device *pdev)
 
 	rkcif_hw_soft_reset(cif_hw, true);
 
+	mutex_init(&cif_hw->dev_lock);
+
 	pm_runtime_enable(&pdev->dev);
 
 	if (data->chip_id == CHIP_RK1808_CIF ||
@@ -962,6 +983,7 @@ static int rkcif_plat_remove(struct platform_device *pdev)
 	if (cif_hw->iommu_en)
 		rkcif_iommu_cleanup(cif_hw);
 
+	mutex_destroy(&cif_hw->dev_lock);
 	if (cif_hw->chip_id != CHIP_RK1808_CIF &&
 	    cif_hw->chip_id != CHIP_RV1126_CIF &&
 	    cif_hw->chip_id != CHIP_RV1126_CIF_LITE &&
