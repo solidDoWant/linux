@@ -392,12 +392,13 @@ static ssize_t m2dev_supportlist_show(struct class *cls,
 				 struct class_attribute *attr,
 				 char *buf)
 {
-	struct customdev_poweron_data *pdata = gpdata;
+	struct customdev_poweron_data *pdata;
 
 	ssize_t len = 0;
 	int i = 0;
 	int m2dev_list_len = sizeof(m2dev_support_list) / sizeof(m2dev_support_list[0]);
 
+	pdata = gpdata;
 	for(i=0; i<m2dev_list_len; i++){
 		if (len >= PAGE_SIZE)
 			break;
@@ -423,11 +424,12 @@ static ssize_t minipciedev_supportlist_show(struct class *cls,
 				 struct class_attribute *attr,
 				 char *buf)
 {
-	struct customdev_poweron_data *pdata = gpdata;
+	struct customdev_poweron_data *pdata;
 	ssize_t len = 0;
 	int i= 0;
 	int minipciedev_list_len = sizeof(minipciedev_support_list) / sizeof(minipciedev_support_list[0]);
 
+	pdata = gpdata;
 	for(i=0; i<minipciedev_list_len; i++){
 		if (len >= PAGE_SIZE)
 			break;
@@ -452,7 +454,6 @@ static ssize_t m2dev_reset_store(struct class *cls,
 				  struct class_attribute *attr,
 				  const char *buf, size_t count)
 {
-	int ret;
 	struct customdev_poweron_data *pdata = gpdata;
 
 	printk("m2dev reset %s start\n", buf);
@@ -484,7 +485,6 @@ static ssize_t minipciedev_reset_store(struct class *cls,
 				  struct class_attribute *attr,
 				  const char *buf, size_t count)
 {
-	int ret;
 	struct customdev_poweron_data *pdata = gpdata;
 
 	printk("minipcie reset %s start\n", buf);
