@@ -181,6 +181,7 @@ struct vop_plane_state {
 	bool r2r_en;
 	bool r2y_en;
 	int color_space;
+	int color_key;
 	unsigned int csc_mode;
 	int global_alpha;
 	int blend_mode;
@@ -215,6 +216,8 @@ struct vop_win {
 	u64 feature;
 	struct vop *vop;
 	struct vop_plane_state state;
+
+	struct drm_property *color_key_prop;
 };
 
 struct vop {
@@ -1759,6 +1762,68 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 	spin_unlock(&vop->reg_lock);
 }
 
+static void vop_plane_setup_color_key(struct drm_plane *plane)
+{
+	struct drm_plane_state *pstate = plane->state;
+	struct vop_plane_state *vpstate = to_vop_plane_state(pstate);
+	struct drm_framebuffer *fb = pstate->fb;
+	struct vop_win *win = to_vop_win(plane);
+	struct vop *vop = win->vop;
+	uint32_t color_key_en = 0;
+	uint32_t color_key;
+	uint32_t r = 0;
+	uint32_t g = 0;
+	uint32_t b = 0;
+
+	if (!(vpstate->color_key & VOP_COLOR_KEY_MASK) || fb->format->is_yuv) {
+		VOP_WIN_SET(vop, win, color_key_en, 0);
+		return;
+	}
+
+	switch (fb->format->format) {
+	case DRM_FORMAT_RGB565:
+	case DRM_FORMAT_BGR565:
+		r = (vpstate->color_key & 0xf800) >> 11;
+		g = (vpstate->color_key & 0x7e0) >> 5;
+		b = (vpstate->color_key & 0x1f);
+		if (VOP_WIN_SUPPORT(vop, win, fmt_10)) {
+			r <<= 5;
+			g <<= 4;
+			b <<= 5;
+		} else {
+			r <<= 3;
+			g <<= 2;
+			b <<= 3;
+		}
+		color_key_en = 1;
+		break;
+	case DRM_FORMAT_XRGB8888:
+	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ABGR8888:
+	case DRM_FORMAT_RGB888:
+	case DRM_FORMAT_BGR888:
+		r = (vpstate->color_key & 0xff0000) >> 16;
+		g = (vpstate->color_key & 0xff00) >> 8;
+		b = (vpstate->color_key & 0xff);
+		if (VOP_WIN_SUPPORT(vop, win, fmt_10)) {
+			r <<= 2;
+			g <<= 2;
+			b <<= 2;
+		}
+		color_key_en = 1;
+		break;
+	}
+
+	if (VOP_WIN_SUPPORT(vop, win, fmt_10))
+		color_key = (r << 20) | (g << 10) | b;
+	else
+		color_key = (r << 16) | (g << 8) | b;
+
+	VOP_WIN_SET(vop, win, color_key_en, color_key_en);
+	VOP_WIN_SET(vop, win, color_key, color_key);
+}
+
 static void vop_plane_atomic_update(struct drm_plane *plane,
 		struct drm_plane_state *old_state)
 {
@@ -1877,6 +1942,9 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 				    drm_rect_width(dest), drm_rect_height(dest),
 				    fb->format->format);
 
+	if (VOP_WIN_SUPPORT(vop, win, color_key))
+		vop_plane_setup_color_key(&win->base);
+
 	VOP_WIN_SET(vop, win, act_info, act_info);
 	VOP_WIN_SET(vop, win, dsp_info, dsp_info);
 	VOP_WIN_SET(vop, win, dsp_st, dsp_st);
@@ -1894,6 +1962,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	if ((is_alpha_support(fb->format->format) || global_alpha_en) &&
 	    (s->dsp_layer_sel & 0x3) != win->win_id) {
 		int src_blend_m0;
+		int pre_multi_alpha = ALPHA_SRC_PRE_MUL;
 
 		if (is_alpha_support(fb->format->format) && global_alpha_en)
 			src_blend_m0 = ALPHA_PER_PIX_GLOBAL;
@@ -1902,18 +1971,21 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 		else
 			src_blend_m0 = ALPHA_GLOBAL;
 
+
+		if (vop_plane_state->blend_mode == 0 || src_blend_m0 == ALPHA_GLOBAL)
+			pre_multi_alpha = ALPHA_SRC_NO_PRE_MUL;
+
 		VOP_WIN_SET(vop, win, dst_alpha_ctl,
 			    DST_FACTOR_M0(ALPHA_SRC_INVERSE));
-		val = SRC_ALPHA_EN(1) | SRC_COLOR_M0(ALPHA_SRC_PRE_MUL) |
+		val = SRC_ALPHA_EN(1) | SRC_COLOR_M0(pre_multi_alpha) |
 			SRC_ALPHA_M0(ALPHA_STRAIGHT) |
 			SRC_BLEND_M0(src_blend_m0) |
 			SRC_ALPHA_CAL_M0(ALPHA_SATURATION) |
 			SRC_FACTOR_M0(global_alpha_en ?
 				      ALPHA_SRC_GLOBAL : ALPHA_ONE);
 		VOP_WIN_SET(vop, win, src_alpha_ctl, val);
-		VOP_WIN_SET(vop, win, alpha_pre_mul,
-			    vop_plane_state->blend_mode);
-		VOP_WIN_SET(vop, win, alpha_mode, 1);
+		VOP_WIN_SET(vop, win, alpha_pre_mul, !pre_multi_alpha); /* VOP lite only */
+		VOP_WIN_SET(vop, win, alpha_mode, src_blend_m0); /* VOP lite only */
 		VOP_WIN_SET(vop, win, alpha_en, 1);
 	} else {
 		VOP_WIN_SET(vop, win, src_alpha_ctl, SRC_ALPHA_EN(0));
@@ -2190,6 +2262,11 @@ static int vop_atomic_plane_set_property(struct drm_plane *plane,
 		return 0;
 	}
 
+	if (property == win->color_key_prop) {
+		plane_state->color_key = val;
+		return 0;
+	}
+
 	DRM_ERROR("failed to set vop plane property id:%d, name:%s\n",
 		   property->base.id, property->name);
 
@@ -2245,6 +2322,11 @@ static int vop_atomic_plane_get_property(struct drm_plane *plane,
 				return 0;
 			}
 		}
+	}
+
+	if (property == win->color_key_prop) {
+		*val = plane_state->color_key;
+		return 0;
 	}
 
 	DRM_ERROR("failed to get vop plane property id:%d, name:%s\n",
@@ -2659,6 +2741,7 @@ static u64 vop_calc_max_bandwidth(struct vop_bandwidth *bw, int start,
 
 static size_t vop_crtc_bandwidth(struct drm_crtc *crtc,
 				 struct drm_crtc_state *crtc_state,
+				 size_t *frame_bw_mbyte,
 				 unsigned int *plane_num_total)
 {
 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
@@ -4185,6 +4268,9 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 				   private->blend_mode_prop, 0);
 	drm_object_attach_property(&win->base.base,
 				   private->async_commit_prop, 0);
+	if (VOP_WIN_SUPPORT(vop, win, color_key))
+		drm_object_attach_property(&win->base.base,
+					   win->color_key_prop, 0);
 
 	if (win->parent)
 		drm_object_attach_property(&win->base.base, private->share_id_prop,
@@ -4476,6 +4562,10 @@ static int vop_win_init(struct vop *vop)
 		vop_win->area_id = 0;
 		vop_win->zpos = vop_plane_get_zpos(win_data->type,
 						   vop_data->win_size);
+		if (VOP_WIN_SUPPORT(vop, vop_win, color_key))
+			vop_win->color_key_prop = drm_property_create_range(vop->drm_dev, 0,
+									    "colorkey", 0,
+									    0x80ffffff);
 
 		num_wins++;
 

@@ -358,6 +358,10 @@ struct dw_hdmi {
 	struct cec_notifier *cec_notifier;
 
 	bool initialized;		/* hdmi is enabled before bind */
+	hdmi_codec_plugged_cb plugged_cb;
+	struct device *codec_dev;
+	enum drm_connector_status last_connector_result;
+	bool rgb_quant_range_selectable;
 };
 
 #define HDMI_IH_PHY_STAT0_RX_SENSE \
@@ -382,6 +386,28 @@ static inline u8 hdmi_readb(struct dw_hdmi *hdmi, int offset)
 	return val;
 }
 
+static void handle_plugged_change(struct dw_hdmi *hdmi, bool plugged)
+{
+	if (hdmi->plugged_cb && hdmi->codec_dev)
+		hdmi->plugged_cb(hdmi->codec_dev, plugged);
+}
+
+int dw_hdmi_set_plugged_cb(struct dw_hdmi *hdmi, hdmi_codec_plugged_cb fn,
+			   struct device *codec_dev)
+{
+	bool plugged;
+
+	mutex_lock(&hdmi->mutex);
+	hdmi->plugged_cb = fn;
+	hdmi->codec_dev = codec_dev;
+	plugged = hdmi->last_connector_result == connector_status_connected;
+	handle_plugged_change(hdmi, plugged);
+	mutex_unlock(&hdmi->mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dw_hdmi_set_plugged_cb);
+
 static void hdmi_modb(struct dw_hdmi *hdmi, u8 data, u8 mask, unsigned reg)
 {
 	regmap_update_bits(hdmi->regm, reg << hdmi->reg_shift, mask, data);
@@ -393,14 +419,23 @@ static void hdmi_mask_writeb(struct dw_hdmi *hdmi, u8 data, unsigned int reg,
 	hdmi_modb(hdmi, data << shift, mask, reg);
 }
 
-static void dw_hdmi_check_output_type(struct dw_hdmi *hdmi)
+static bool dw_hdmi_check_output_type_changed(struct dw_hdmi *hdmi)
 {
+	bool sink_hdmi;
+
+	sink_hdmi = hdmi->sink_is_hdmi;
+
 	if (hdmi->force_output == 1)
 		hdmi->sink_is_hdmi = true;
 	else if (hdmi->force_output == 2)
 		hdmi->sink_is_hdmi = false;
 	else
 		hdmi->sink_is_hdmi = hdmi->support_hdmi;
+
+	if (sink_hdmi != hdmi->sink_is_hdmi)
+		return true;
+
+	return false;
 }
 
 static void repo_hpd_event(struct work_struct *p_work)
@@ -1862,12 +1897,10 @@ static void hdmi_config_AVI(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	/* Initialise info frame from DRM mode */
 	drm_hdmi_avi_infoframe_from_display_mode(&frame, mode, is_hdmi2);
 
-	/*
-	 * Ignore monitor selectable quantization, use quantization set
-	 * by the user
-	 */
 	drm_hdmi_avi_infoframe_quant_range(&frame, mode, rgb_quant_range,
-					   true, is_hdmi2);
+					   hdmi->rgb_quant_range_selectable || is_hdmi2,
+					   is_hdmi2);
+
 	if (hdmi_bus_fmt_is_yuv444(hdmi->hdmi_data.enc_out_bus_format))
 		frame.colorspace = HDMI_COLORSPACE_YUV444;
 	else if (hdmi_bus_fmt_is_yuv422(hdmi->hdmi_data.enc_out_bus_format))
@@ -2687,7 +2720,7 @@ dw_hdmi_connector_detect(struct drm_connector *connector, bool force)
 {
 	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi,
 					     connector);
-	int connect_status;
+	enum drm_connector_status result;
 
 	if (!hdmi->force_logo) {
 		mutex_lock(&hdmi->mutex);
@@ -2697,13 +2730,21 @@ dw_hdmi_connector_detect(struct drm_connector *connector, bool force)
 		mutex_unlock(&hdmi->mutex);
 	}
 
-	connect_status = hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
-	if (connect_status == connector_status_connected)
+	result = hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
+	if (result == connector_status_connected)
 		extcon_set_state_sync(hdmi->extcon, EXTCON_DISP_HDMI, true);
 	else
 		extcon_set_state_sync(hdmi->extcon, EXTCON_DISP_HDMI, false);
 
-	return connect_status;
+	mutex_lock(&hdmi->mutex);
+	if (result != hdmi->last_connector_result) {
+		dev_dbg(hdmi->dev, "read_hpd result: %d", result);
+		handle_plugged_change(hdmi,
+				result == connector_status_connected);
+		hdmi->last_connector_result = result;
+	}
+	mutex_unlock(&hdmi->mutex);
+	return result;
 }
 
 static int
@@ -2757,6 +2798,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 
 		hdmi->support_hdmi = drm_detect_hdmi_monitor(edid);
 		hdmi->sink_has_audio = drm_detect_monitor_audio(edid);
+		hdmi->rgb_quant_range_selectable = drm_rgb_quant_range_selectable(edid);
 		drm_connector_update_edid_property(connector, edid);
 		cec_notifier_set_phys_addr_from_edid(hdmi->cec_notifier, edid);
 		ret = drm_add_edid_modes(connector, edid);
@@ -2765,6 +2807,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 	} else {
 		hdmi->support_hdmi = true;
 		hdmi->sink_has_audio = true;
+		hdmi->rgb_quant_range_selectable = false;
 
 		for (i = 0; i < ARRAY_SIZE(dw_hdmi_default_modes); i++) {
 			const struct drm_display_mode *ptr =
@@ -2787,7 +2830,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 
 		dev_info(hdmi->dev, "failed to get edid\n");
 	}
-	dw_hdmi_check_output_type(hdmi);
+	dw_hdmi_check_output_type_changed(hdmi);
 
 	return ret;
 }
@@ -2926,6 +2969,9 @@ static int dw_hdmi_connector_atomic_check(struct drm_connector *connector,
 
 void dw_hdmi_set_quant_range(struct dw_hdmi *hdmi)
 {
+	if (!hdmi->bridge_is_on)
+		return;
+
 	hdmi_writeb(hdmi, HDMI_FC_GCP_SET_AVMUTE, HDMI_FC_GCP);
 	dw_hdmi_setup(hdmi, &hdmi->previous_mode);
 	hdmi_writeb(hdmi, HDMI_FC_GCP_CLEAR_AVMUTE, HDMI_FC_GCP);
@@ -2936,7 +2982,11 @@ void dw_hdmi_set_output_type(struct dw_hdmi *hdmi, u64 val)
 {
 	hdmi->force_output = val;
 
-	dw_hdmi_check_output_type(hdmi);
+	if (!dw_hdmi_check_output_type_changed(hdmi))
+		return;
+
+	if (!hdmi->bridge_is_on)
+		return;
 
 	hdmi_writeb(hdmi, HDMI_FC_GCP_SET_AVMUTE, HDMI_FC_GCP);
 	dw_hdmi_setup(hdmi, &hdmi->previous_mode);
@@ -3807,6 +3857,7 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	hdmi->rxsense = true;
 	hdmi->phy_mask = (u8)~(HDMI_PHY_HPD | HDMI_PHY_RX_SENSE);
 	hdmi->mc_clkdis = 0x7f;
+	hdmi->last_connector_result = connector_status_disconnected;
 
 	mutex_init(&hdmi->mutex);
 	mutex_init(&hdmi->audio_mutex);
